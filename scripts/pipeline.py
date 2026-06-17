@@ -35,6 +35,7 @@ import datetime
 import difflib
 import json
 import re
+import shutil
 import sys
 import urllib.request
 import urllib.error
@@ -107,6 +108,37 @@ def load_json(path, default):
         return default
     with open(p) as f:
         return json.load(f)
+
+
+def backup_sources(keep=20):
+    """Snapshot the source-of-truth files BEFORE any mutation so a bad run, a
+    corrupt write, or an external delete (e.g. `git clean`) can't lose your data.
+    Timestamped copies go to data/backups/; only the newest `keep` per file are kept.
+    Safe and cheap (plain file copies); skipped automatically under --dry-run."""
+    backups = DATA / "backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    saved = []
+    for name in ("jobs.json", "state.json", "profile.json", "search.json"):
+        src = DATA / name
+        if not src.exists():
+            continue
+        try:
+            shutil.copy2(src, backups / f"{src.stem}-{stamp}{src.suffix}")
+            saved.append(name)
+        except OSError as e:
+            print(f"  backup warning: could not copy {name}: {e}")
+            continue
+        # prune: keep only the newest `keep` snapshots for this file
+        snaps = sorted(backups.glob(f"{src.stem}-*{src.suffix}"))
+        for old in snaps[:-keep]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    if saved:
+        print(f"Backed up {len(saved)} source file(s) -> data/backups/ ({stamp})")
+    return saved
 
 
 def http_get_json(url, timeout=20):
@@ -966,6 +998,10 @@ def main():
     ap.add_argument("--sweep-only", action="store_true",
                     help="ONLY run the discovery sweep; skip the follow-on re-enrich pass")
     args = ap.parse_args()
+
+    # Snapshot the source-of-truth files before mutating anything (no-op on --dry-run).
+    if not args.dry_run:
+        backup_sources()
 
     # --reenrich: enrich-only, no discovery.
     if args.reenrich:

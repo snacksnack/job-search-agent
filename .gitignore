@@ -32,6 +32,8 @@ data/resumes/*
 data/briefs/
 # generated tailored resumes & cover letters:
 data/applications/
+# timestamped snapshots of the source-of-truth files (personal data):
+data/backups/
 # raw discovery finds dropped by Claude in Chrome:
 data/inbox/
 # transient cover-letter / interview-prep / draft request queues:
