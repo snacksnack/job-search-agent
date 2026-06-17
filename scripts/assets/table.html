@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Scout — Table</title>
+<style>
+{{CSS}}
+</style>
+</head>
+<body>
+<div class="wrap wide">
+  <header>
+    <h1>Job Board</h1>
+    <span class="pill" id="totalPill">{{TOTAL}} roles</span>
+  </header>
+  <div class="toolbar" id="toolbar">
+    <div class="controls">
+      <input id="search" type="text" placeholder="Search company, title, tag, location…" oninput="applyFilters()">
+      <label class="toggle"><input type="checkbox" id="showApplied" onchange="applyFilters()"> Show applied</label>
+      <label class="toggle"><input type="checkbox" id="showHidden" onchange="applyFilters()"> Show hidden</label>
+      <select id="prepFilter" class="filter-select" onchange="applyFilters()" title="Filter by interview-prep kit">
+        <option value="all">Prep: all</option>
+        <option value="has">Has prep pack</option>
+        <option value="none">No prep pack</option>
+      </select>
+      <button class="ghost" onclick="location.reload()">Refresh</button>
+      <button class="ghost" onclick="resetState()">Reset state</button>
+      <a class="ghost view-toggle" id="boardLink" href="/">▦ Board view</a>
+    </div>
+    <div class="counts"><span id="shownCount">{{SHOWN}}</span> shown · {{TOTAL}} total · {{APPLIED}} applied · {{HIDDEN}} hidden · top match {{TOP_MATCH}}</div>
+  </div>
+  <table class="jobtable" id="jobtable">
+    <thead>
+      <tr>
+        <th data-sort="score" title="Sort by match score">Match</th>
+        <th data-sort="title">Title</th>
+        <th data-sort="company">Company</th>
+        <th data-sort="salary">Salary</th>
+        <th>Location</th>
+        <th data-sort="posted">Posted</th>
+        <th>Source</th>
+        <th>Status</th>
+        <th>Prep</th>
+        <th>Links</th>
+      </tr>
+    </thead>
+    <tbody id="rows">{{ROWS}}</tbody>
+  </table>
+  <footer>Run date {{RUN_DATE}} · source of truth: data/jobs.json + data/state.json · generated {{GENERATED}}</footer>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+{{JS}}
+</script>
+</body>
+</html>

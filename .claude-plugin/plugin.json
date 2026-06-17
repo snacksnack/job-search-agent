@@ -1,0 +1,15 @@
+{
+  "name": "job-scout",
+  "version": "0.1.0",
+  "description": "Personalized daily job search for Technical Program Manager, Solutions Engineer, and Forward Deployed Engineer roles. Runs setup once to capture the candidate profile, salary target, location rules, and resume; then a daily search discovers roles across LinkedIn, hiring.cafe, Wellfound, and Built In NYC, pulls clean canonical data from Greenhouse/Lever/Ashby APIs, scores each role against the profile, and writes results to local JSON (jobs.json is the source of truth) served by a local board; it can also generate company briefs, tailored application materials, and interview prep.",
+  "author": {
+    "name": "Job Scout contributors"
+  },
+  "keywords": [
+    "job-search",
+    "technical-program-manager",
+    "solutions-engineer",
+    "forward-deployed-engineer",
+    "career"
+  ]
+}

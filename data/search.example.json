@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "_comment": "Example search config + watchlist. Copy to data/search.json and edit, or let the setup skill generate one. data/search.json is gitignored. The watchlist below is a generic starter set of companies on public ATS boards — replace with your own targets.",
+  "searches": [
+    {
+      "id": "google-ats-boards",
+      "name": "Google/WebSearch — ATS boards (TPM / SE / FDE)",
+      "source": "googleAtsBoards",
+      "platform": "google",
+      "url": null,
+      "method": "webSearch",
+      "resultLimit": 30,
+      "targetSites": [
+        "boards.greenhouse.io",
+        "job-boards.greenhouse.io",
+        "jobs.lever.co",
+        "jobs.ashbyhq.com",
+        "apply.workable.com",
+        "jobs.smartrecruiters.com"
+      ],
+      "queryTemplate": null,
+      "filters": {
+        "keywords": [
+          "Technical Program Manager",
+          "Solutions Engineer",
+          "Forward Deployed Engineer",
+          "Implementation Engineer",
+          "Deployment Engineer"
+        ],
+        "excludeKeywords": [
+          "Product Manager",
+          "Account Executive",
+          "Marketing",
+          "Sales Development"
+        ],
+        "salaryMin": 150000,
+        "experienceLevel": ["Senior", "Staff", "Principal"],
+        "remote": true,
+        "datePosted": "past24h"
+      },
+      "enabled": true
+    },
+    {
+      "id": "hiring-cafe",
+      "name": "hiring.cafe — TPM / SE / FDE",
+      "source": "hiringCafe",
+      "platform": "hiringCafe",
+      "url": "https://hiring.cafe/",
+      "method": "api-or-browser",
+      "resultLimit": 30,
+      "queryTemplate": null,
+      "filters": {
+        "keywords": [
+          "Technical Program Manager",
+          "Solutions Engineer",
+          "Forward Deployed Engineer"
+        ],
+        "excludeKeywords": ["Product Manager", "Account Executive"],
+        "salaryMin": 150000,
+        "experienceLevel": ["Senior", "Staff", "Principal"],
+        "remote": true,
+        "datePosted": "past24h"
+      },
+      "enabled": true
+    },
+    {
+      "id": "linkedin-keyword",
+      "name": "LinkedIn keyword — TPM / SE / FDE",
+      "source": "linkedinKeyword",
+      "platform": "linkedin",
+      "url": "https://www.linkedin.com/jobs/search/?keywords=%22Technical%20Program%20Manager%22%20OR%20%22Solutions%20Engineer%22%20OR%20%22Forward%20Deployed%20Engineer%22&f_TPR=r86400&f_WT=2",
+      "method": "browser",
+      "resultLimit": 25,
+      "queryTemplate": null,
+      "filters": {
+        "keywords": [
+          "Technical Program Manager",
+          "Solutions Engineer",
+          "Forward Deployed Engineer"
+        ],
+        "excludeKeywords": ["Product Manager", "Account Executive"],
+        "salaryMin": 150000,
+        "experienceLevel": ["Senior", "Staff", "Principal"],
+        "remote": true,
+        "datePosted": "past24h"
+      },
+      "enabled": true
+    }
+  ],
+  "watchlist": [
+    { "company": "Anthropic", "ats": "greenhouse", "slug": "anthropic" },
+    { "company": "Affirm", "ats": "greenhouse", "slug": "affirm" },
+    { "company": "Cresta", "ats": "greenhouse", "slug": "cresta" },
+    { "company": "Grafana Labs", "ats": "greenhouse", "slug": "grafanalabs" },
+    { "company": "Airtable", "ats": "greenhouse", "slug": "airtable" },
+    { "company": "Databricks", "ats": "greenhouse", "slug": "databricks" },
+    { "company": "HashiCorp", "ats": "greenhouse", "slug": "hashicorp" },
+    { "company": "Datadog", "ats": "greenhouse", "slug": "datadog" },
+    { "company": "Confluent", "ats": "greenhouse", "slug": "confluent" },
+    { "company": "Snowflake", "ats": "greenhouse", "slug": "snowflake" },
+    { "company": "Stripe", "ats": "greenhouse", "slug": "stripe" },
+    { "company": "Vercel", "ats": "greenhouse", "slug": "vercel" },
+    { "company": "Retool", "ats": "greenhouse", "slug": "retool" },
+    { "company": "Plaid", "ats": "lever", "slug": "plaid" },
+    { "company": "The Athletic Media Company", "ats": "lever", "slug": "theathletic" },
+    { "company": "Linear", "ats": "ashby", "slug": "linear" },
+    { "company": "Vanta", "ats": "ashby", "slug": "vanta" },
+    { "company": "Replit", "ats": "ashby", "slug": "replit" }
+  ],
+  "atsApi": {
+    "note": "Per-company public job-board APIs. Resolve {slug} from a company's job-board URL, fetch via plain HTTP (no auth), then filter titles against profile.targetTitles + matching rules. Used for (a) enriching a posting discovered elsewhere, and (b) directly monitoring companies in the watchlist.",
+    "greenhouse": "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true",
+    "lever": "https://api.lever.co/v0/postings/{slug}?mode=json",
+    "ashby": "https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true",
+    "workable": "https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true",
+    "smartrecruiters": "https://api.smartrecruiters.com/v1/companies/{slug}/postings (list; full JD via .../postings/{id}, filled by --reenrich)"
+  }
+}

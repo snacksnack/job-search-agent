@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Personal + produced data is NOT committed. The repo ships generic
+# *.example.json templates; your real files live locally and are ignored.
+# (NOTE: .gitignore has no inline comments — keep comments on their own lines.)
+# ---------------------------------------------------------------------------
+
+# your personal config (copy from the .example.json templates):
+data/profile.json
+data/search.json
+# your decisions (applied/hidden/status):
+data/state.json
+# produced output — discovered/matched roles:
+data/jobs.json
+# per-run audit log:
+data/search-log.json
+# rendered on the fly by scripts/serve.py:
+data/board.html
+# your resume(s):
+data/resumes/*
+# generated company briefs:
+data/briefs/
+# generated tailored resumes & cover letters:
+data/applications/
+# raw discovery finds dropped by Claude in Chrome:
+data/inbox/
+# transient cover-letter / interview-prep / draft request queues:
+data/queue/
+# generated interview-prep packs (local-only, viewed via the board's /prep route).
+# Use /* (not /) so the .gitkeep below can be re-included — a negation can't
+# re-include a file inside a fully-ignored directory.
+data/interview-prep/*
+
+# Keep the empty dirs in git so the pipeline/server can rely on them
+!data/briefs/.gitkeep
+!data/applications/.gitkeep
+!data/inbox/.gitkeep
+!data/queue/.gitkeep
+!data/interview-prep/.gitkeep
+!data/resumes/.gitkeep
+
+# Tracked: the code, the skills, and the generic templates
+#   data/profile.example.json, data/search.example.json

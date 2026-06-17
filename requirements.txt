@@ -1,0 +1,6 @@
+# No third-party dependencies.
+#
+# The pipeline (scripts/pipeline.py) and board server (scripts/serve.py)
+# use only the Python standard library (urllib, http.server, json) so the
+# whole thing runs with a bare `python3` install and stays trivially
+# portable to AWS Lambda later. Requires Python 3.11+ (developed on 3.14).

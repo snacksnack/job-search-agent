@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 1,
+  "_comment": "Example profile. Copy to data/profile.json and edit, or run the job-search-setup skill to generate one from your resume. data/profile.json is gitignored (personal).",
+  "candidate": {
+    "name": "Your Name",
+    "currentRole": "Senior Technical Program Manager at Example Co.",
+    "yearsExperience": 10,
+    "managementExperience": "Describe your leadership style here (e.g. cross-functional program/delivery leadership; IC vs people-manager preference). Used as context when matching roles.",
+    "technicalBackground": "Summarize your technical background here (languages, cloud, data, observability, etc.). This feeds the skill-match assessment.",
+    "domainExpertise": [
+      "platform / infrastructure",
+      "data / ML platforms",
+      "developer tooling & CI/CD",
+      "cloud"
+    ],
+    "location": "Your City, ST",
+    "contact": {
+      "email": "you@example.com",
+      "linkedin": "linkedin.com/in/your-handle",
+      "website": "your-site.com"
+    },
+    "resumePath": "data/resumes/your-resume.docx",
+    "skills": {
+      "note": "Canonical skill/experience list derived from your resume. Used as the reference the daily-job-search skill-match subagent compares each job description against. Edit here to tune what counts as a match; re-run the assessment to refresh.",
+      "languages": ["Python", "SQL"],
+      "cloud": ["AWS", "Lambda", "S3"],
+      "data": ["PostgreSQL", "ETL pipelines"],
+      "observability": ["Prometheus", "Grafana", "distributed tracing"],
+      "toolsAndPractices": ["Docker", "Git", "CI/CD", "Agile", "API design & contracts"],
+      "domains": [
+        "platform / infrastructure",
+        "data / ML platforms",
+        "developer tooling & CI/CD",
+        "cloud"
+      ],
+      "certifications": [],
+      "programManagement": [
+        "technical program management",
+        "cross-functional program & delivery leadership",
+        "release coordination",
+        "stakeholder management",
+        "dependency & risk management",
+        "roadmapping & milestone tracking"
+      ]
+    },
+    "skillMatchSummary": "One-paragraph elevator summary of who you are, used as context for the skill-match assessment."
+  },
+  "preferences": {
+    "salaryTarget": 150000,
+    "remotePolicy": "remote-or-metro",
+    "targetTitles": [
+      "Senior Technical Program Manager",
+      "Technical Program Manager",
+      "Staff Technical Program Manager",
+      "Principal Technical Program Manager",
+      "Solutions Engineer",
+      "Senior Solutions Engineer",
+      "Forward Deployed Engineer",
+      "Senior Forward Deployed Engineer"
+    ],
+    "seniorityLevels": ["Senior", "Staff", "Principal"],
+    "locationRule": {
+      "includeRemoteScope": "US",
+      "metroIncludeAnyArrangement": [
+        "New York City",
+        "NYC",
+        "New York, NY"
+      ],
+      "excludeOnsiteOrHybridOutsideMetro": true,
+      "notes": "Include any role that is fully remote and open to candidates in your scope, OR any role in your target metro regardless of arrangement. Exclude hybrid/onsite roles that require regular presence elsewhere. Edit metroIncludeAnyArrangement for your own metro."
+    },
+    "includePlatformInfraEngineering": "only-if-strong-match",
+    "securityClearance": {
+      "openToClearanceRoles": false,
+      "notes": "Set openToClearanceRoles true if you hold or are willing to pursue a clearance; clearance-required roles are then treated as eligible."
+    },
+    "agentic": {
+      "selfExpandingDiscovery": true,
+      "tailoredMaterials": true,
+      "companyBriefs": true,
+      "selfTuningMatching": true,
+      "morningBriefing": true,
+      "interviewPrep": true,
+      "topN": 10,
+      "autoSend": false
+    },
+    "board": {
+      "type": "local-server",
+      "serverScript": "scripts/serve.py",
+      "host": "127.0.0.1",
+      "port": 8000,
+      "htmlSnapshotPath": "data/board.html",
+      "note": "Local board served from data/jobs.json + data/state.json (the source of truth). The board's status dropdown POSTs to scripts/serve.py, which writes decisions straight to state.json."
+    },
+    "schedule": {
+      "dailyRunTime": "07:00",
+      "timezone": "America/New_York"
+    }
+  },
+  "matching": {
+    "skipTitleRules": [
+      {
+        "category": "Product Management (pure)",
+        "titles": [
+          "Product Manager",
+          "Senior Product Manager",
+          "Group Product Manager",
+          "Principal Product Manager",
+          "Director of Product",
+          "VP of Product",
+          "Product Owner",
+          "Chief Product Officer"
+        ]
+      },
+      {
+        "category": "Marketing",
+        "titles": [
+          "Marketing Manager",
+          "Brand Manager",
+          "Content Marketing Manager",
+          "Demand Gen Manager",
+          "Growth Marketing Manager",
+          "Product Marketing Manager",
+          "Field Marketing"
+        ]
+      },
+      {
+        "category": "Sales (non-technical)",
+        "titles": [
+          "Account Executive",
+          "Sales Manager",
+          "Business Development Representative",
+          "Sales Development Representative",
+          "Account Manager",
+          "Sales Director",
+          "Inside Sales"
+        ]
+      },
+      {
+        "category": "Design",
+        "titles": [
+          "UX Designer",
+          "Product Designer",
+          "Design Manager",
+          "Creative Director",
+          "UI Designer"
+        ]
+      },
+      {
+        "category": "HR/People",
+        "titles": [
+          "People Operations",
+          "HR Manager",
+          "Talent Acquisition",
+          "Recruiter",
+          "Sourcer"
+        ]
+      },
+      {
+        "category": "Finance/Legal",
+        "titles": [
+          "Controller",
+          "FP&A",
+          "Legal Counsel",
+          "Accountant",
+          "Financial Analyst"
+        ]
+      },
+      {
+        "category": "Non-technical PM/coordination",
+        "titles": [
+          "Project Coordinator",
+          "Program Coordinator",
+          "Project Manager (non-technical)",
+          "Scrum Master (standalone)"
+        ]
+      },
+      {
+        "category": "Seniority too high (people-leadership)",
+        "titles": [
+          "Director",
+          "Head of",
+          "VP",
+          "Vice President",
+          "SVP",
+          "Chief",
+          "Senior Director"
+        ]
+      },
+      {
+        "category": "Seniority too junior",
+        "titles": [
+          "Intern",
+          "Junior",
+          "Associate",
+          "Entry Level",
+          "New Grad",
+          "Apprentice"
+        ]
+      }
+    ],
+    "alwaysIncludeTitles": [
+      "Technical Program Manager",
+      "Senior Technical Program Manager",
+      "Staff Technical Program Manager",
+      "Principal Technical Program Manager",
+      "Solutions Engineer",
+      "Senior Solutions Engineer",
+      "Sales Engineer",
+      "Pre-Sales Engineer",
+      "Technical Solutions Engineer",
+      "Solutions Consultant",
+      "Solutions Architect",
+      "Forward Deployed Engineer",
+      "Forward Deployed Software Engineer",
+      "Deployment Engineer",
+      "Implementation Engineer",
+      "Integration Engineer",
+      "Customer Engineer",
+      "Field Engineer",
+      "Professional Services Engineer",
+      "Delivery Engineer",
+      "Onboarding Engineer"
+    ],
+    "skipEmployers": [
+      "Ladders",
+      "The Ladders",
+      "Ladders.com",
+      "Dice",
+      "Jobot",
+      "CyberCoders"
+    ],
+    "descriptionSkips": [
+      "Role is primarily a quota-carrying or commission-driven sales position — i.e. compensation or the core day-to-day responsibility is tethered to hitting individual sales quotas/targets. Skip unless the role is otherwise a near-perfect technical fit and the quota element is incidental (many Solutions/Forward Deployed Engineer roles are pre-sales but NOT quota-carrying — those are fine)."
+    ],
+    "priorityDomains": [
+      "platform / infrastructure",
+      "data / ML platforms",
+      "developer tooling & CI/CD",
+      "cloud"
+    ],
+    "adjacentDomains": [
+      "SaaS",
+      "observability / reliability",
+      "fintech / data products"
+    ],
+    "secondaryIncludeTitles": {
+      "note": "Adjacent titles that should APPEAR on the board but rank BELOW the primary targetTitles. Technical Project Manager is a coordination-leaning cousin of Technical Program Manager — included, but deliberately scored lower so true Program Manager roles sort above it. Plain non-technical 'Project Manager' is NOT here and stays excluded.",
+      "titles": [
+        "Technical Project Manager",
+        "Senior Technical Project Manager",
+        "Staff Technical Project Manager",
+        "Principal Technical Project Manager"
+      ]
+    }
+  }
+}
