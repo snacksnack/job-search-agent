@@ -1,5 +1,9 @@
 const APPLIED = new Set(["applied", "interviewing", "offer", "rejected"]);
 
+// Which group the table is filtered to. Count chips + checkboxes are two synced
+// controls for this one value: active (default) | applied | hidden | all.
+let view = "active";
+
 // Table-owned sort state. null => server's default order (priority, then match desc).
 let sortKey = null;
 let sortDir = "desc";
@@ -18,8 +22,7 @@ function currentParams() {
   const p = new URLSearchParams();
   const q = document.getElementById("search").value.trim();
   if (q) p.set("q", q);
-  if (document.getElementById("showApplied").checked) p.set("applied", "1");
-  if (document.getElementById("showHidden").checked) p.set("hidden", "1");
+  if (view !== "active") p.set("view", view);
   const prep = document.getElementById("prepFilter").value;
   if (prep && prep !== "all") p.set("prep", prep);
   if (sortKey) { p.set("sort", sortKey); p.set("dir", sortDir); }
@@ -36,24 +39,48 @@ function refreshViewToggle() {
 function initFromParams() {
   const url = new URLSearchParams(location.search);
   if (url.has("q")) document.getElementById("search").value = url.get("q");
-  document.getElementById("showApplied").checked = url.get("applied") === "1";
-  document.getElementById("showHidden").checked = url.get("hidden") === "1";
   const prep = url.get("prep");
   if (prep) document.getElementById("prepFilter").value = prep;
+  view = url.get("view") ||
+    (url.get("applied") === "1" ? "applied" : url.get("hidden") === "1" ? "hidden" : "active");
   if (url.get("sort")) { sortKey = url.get("sort"); sortDir = url.get("dir") || "desc"; }
+  syncControls();
+}
+
+// Reflect the current view in the checkboxes (mutually exclusive) and highlight the
+// matching count chip.
+function syncControls() {
+  document.getElementById("showApplied").checked = view === "applied";
+  document.getElementById("showHidden").checked = view === "hidden";
+  document.querySelectorAll(".cfilter").forEach(b =>
+    b.classList.toggle("active", b.dataset.view === view));
+}
+
+function setView(v) {
+  view = v;
+  syncControls();
+  applyFilters();
+}
+
+// Checkbox handler: checking a box focuses that group; unchecking returns to active.
+function onToggle(group, checked) {
+  setView(checked ? group : "active");
 }
 
 function applyFilters() {
   const q = document.getElementById("search").value.trim().toLowerCase();
-  const showApplied = document.getElementById("showApplied").checked;
-  const showHidden = document.getElementById("showHidden").checked;
   const prepFilter = document.getElementById("prepFilter").value;
   let shown = 0;
   document.querySelectorAll("tr.row").forEach(r => {
     const st = r.dataset.status;
-    let visible = !q || r.dataset.search.includes(q);
-    if (st === "hidden" && !showHidden) visible = false;
-    if (APPLIED.has(st) && !showApplied) visible = false;
+    const isApplied = APPLIED.has(st);
+    const isHidden = st === "hidden";
+    let inView;
+    if (view === "all") inView = true;
+    else if (view === "applied") inView = isApplied;
+    else if (view === "hidden") inView = isHidden;
+    else inView = !isApplied && !isHidden;            // active: neither applied nor hidden
+    let visible = inView && (!q || r.dataset.search.includes(q));
     if (prepFilter === "has" && r.dataset.prep !== "1") visible = false;
     if (prepFilter === "none" && r.dataset.prep === "1") visible = false;
     r.style.display = visible ? "" : "none";

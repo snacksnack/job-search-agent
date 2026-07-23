@@ -19,8 +19,8 @@
   <div class="toolbar" id="toolbar">
     <div class="controls">
       <input id="search" type="text" placeholder="Search company, title, tag, location…" oninput="applyFilters()">
-      <label class="toggle"><input type="checkbox" id="showApplied" onchange="applyFilters()"> Show applied</label>
-      <label class="toggle"><input type="checkbox" id="showHidden" onchange="applyFilters()"> Show hidden</label>
+      <label class="toggle"><input type="checkbox" id="showApplied" onchange="onToggle('applied', this.checked)"> Show applied</label>
+      <label class="toggle"><input type="checkbox" id="showHidden" onchange="onToggle('hidden', this.checked)"> Show hidden</label>
       <select id="prepFilter" class="filter-select" onchange="applyFilters()" title="Filter by interview-prep kit">
         <option value="all">Prep: all</option>
         <option value="has">Has prep pack</option>
@@ -30,7 +30,13 @@
       <button class="ghost" onclick="resetState()">Reset state</button>
       <a class="ghost view-toggle" id="boardLink" href="/">▦ Board view</a>
     </div>
-    <div class="counts"><span id="shownCount">{{SHOWN}}</span> shown · {{TOTAL}} total · {{APPLIED}} applied · {{HIDDEN}} hidden · top match {{TOP_MATCH}}</div>
+    <div class="counts">
+      <button type="button" class="cfilter" data-view="active" onclick="setView('active')" title="Show active jobs only"><span id="shownCount">{{SHOWN}}</span> shown</button> ·
+      <button type="button" class="cfilter" data-view="all" onclick="setView('all')" title="Show every job">{{TOTAL}} total</button> ·
+      <button type="button" class="cfilter" data-view="applied" onclick="setView('applied')" title="Show applied jobs only">{{APPLIED}} applied</button> ·
+      <button type="button" class="cfilter" data-view="hidden" onclick="setView('hidden')" title="Show hidden jobs only">{{HIDDEN}} hidden</button> ·
+      <span class="cstat">top match {{TOP_MATCH}}</span>
+    </div>
   </div>
   <table class="jobtable" id="jobtable">
     <thead>
