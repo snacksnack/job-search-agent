@@ -168,11 +168,11 @@ def _prep_page(title, body_html):
 .prepwrap {{ max-width:820px; margin:0 auto; padding:32px 22px 80px; }}
 .prepwrap a.back {{ color:var(--muted); font-size:13px; text-decoration:none; }}
 .prepwrap a.back:hover {{ color:var(--accent); }}
-.prose h1 {{ font-size:24px; margin:18px 0 10px; }}
-.prose h2 {{ font-size:19px; margin:24px 0 8px; border-top:1px solid var(--line); padding-top:18px; }}
-.prose h3 {{ font-size:16px; margin:18px 0 6px; color:#c6cad8; }}
-.prose p {{ color:#c2c7d4; font-size:14px; line-height:1.6; }}
-.prose li {{ color:#c2c7d4; font-size:14px; line-height:1.55; margin:3px 0; }}
+.prose h1 {{ font-size:24px; margin:18px 0 10px; color:var(--txt); }}
+.prose h2 {{ font-size:14px; margin:24px 0 10px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; color:var(--txt); border-bottom:1.5px solid var(--txt); padding-bottom:5px; }}
+.prose h3 {{ font-size:16px; margin:18px 0 6px; color:var(--txt); }}
+.prose p {{ color:var(--txt2); font-size:14px; line-height:1.6; }}
+.prose li {{ color:var(--txt2); font-size:14px; line-height:1.55; margin:3px 0; }}
 .prose ul, .prose ol {{ padding-left:22px; }}
 .prose code {{ background:var(--card2); padding:1px 5px; border-radius:5px; font-size:13px; }}
 .prose pre {{ background:var(--card2); padding:12px 14px; border-radius:9px; overflow:auto; }}
@@ -213,22 +213,22 @@ def _card(r, dec):
     sources = ", ".join(r.get("appearedInSources", [r.get("source", "")]))
     # Only render the Posted field when we actually have a date (was "Posted \u2014").
     posted = r.get("postedDate")
-    posted_span = f'<span>\U0001F4C5 Posted {esc(posted)}</span>' if posted else ""
+    posted_span = f'<span><span class="mk">posted</span>{esc(posted)}</span>' if posted else ""
 
     # Source + ATS links
     src_url = r.get("sourceUrl") or ""
     ats_url = r.get("atsUrl") or ""
     link_parts = []
     if src_url:
-        link_parts.append(f'<a class="jlink src" href="{esc(src_url)}" target="_blank" rel="noopener">\U0001F517 Source listing</a>')
+        link_parts.append(f'<a class="jlink src" href="{esc(src_url)}" target="_blank" rel="noopener">Source listing \u2197</a>')
     else:
         link_parts.append('<span class="jlink pending">Source \u2014 pending</span>')
     if ats_url:
-        link_parts.append(f'<a class="jlink ats" href="{esc(ats_url)}" target="_blank" rel="noopener">\U0001F4DD Apply (ATS)</a>')
+        link_parts.append(f'<a class="jlink ats" href="{esc(ats_url)}" target="_blank" rel="noopener">Apply (ATS) \u2197</a>')
     else:
         link_parts.append('<span class="jlink pending">Apply (ATS) \u2014 pending</span>')
     if has_prep(rid):
-        link_parts.append(f'<a class="jlink prep" href="/prep/{esc(rid)}" target="_blank" rel="noopener">\U0001F4CB View Interview Prep</a>')
+        link_parts.append(f'<a class="jlink prep" href="/prep/{esc(rid)}" target="_blank" rel="noopener">View Interview Prep \u2197</a>')
     links_row = '<div class="links">' + "".join(link_parts) + "</div>"
 
     # Skill match (matched = green chips, gaps = amber chips), cached on the role
@@ -251,7 +251,7 @@ def _card(r, dec):
 
     status_badge = f'<span class="status status-{esc(status)}">{esc(status).title()}</span>'
     pri_badge = '<span class="pri-badge">Priority</span>' if pri else ""
-    prep_badge = '<span class="prep-flag" title="Interview prep pack generated">\U0001F4CB Prep</span>' if prep else ""
+    prep_badge = '<span class="prep-flag" title="Interview prep pack generated">Prep</span>' if prep else ""
     classes = "card" + (" hidden-card" if hidden else "") + (" applied-card" if applied else "") + (" priority" if pri else "")
 
     status_opts = "".join(
@@ -270,11 +270,11 @@ def _card(r, dec):
         <div class="badges">{pri_badge}{prep_badge}{status_badge}</div>
       </div>
       <div class="meta">
-        <span>\U0001F4B0 {esc(salary_str(r))}</span>
-        <span>\U0001F4CD {esc(r.get('location'))}</span>
-        <span>\U0001F3E0 {esc(r.get('remoteStatus'))}</span>
+        <span><span class="mk">pay</span>{esc(salary_str(r))}</span>
+        <span><span class="mk">loc</span>{esc(r.get('location'))}</span>
+        <span><span class="mk">mode</span>{esc(r.get('remoteStatus'))}</span>
         {posted_span}
-        <span>\U0001F50E {esc(sources)}</span>
+        <span><span class="mk">src</span>{esc(sources)}</span>
       </div>
       <div class="tags">{tags}</div>
       <div class="rationale">{esc(r.get('rationale'))}</div>
@@ -347,14 +347,14 @@ def _row(r, dec):
     ats_url = r.get("atsUrl") or ""
     link_bits = []
     if src_url:
-        link_bits.append(f'<a class="tlink" href="{esc(src_url)}" target="_blank" rel="noopener" title="Source listing">\U0001F517</a>')
+        link_bits.append(f'<a class="tlink" href="{esc(src_url)}" target="_blank" rel="noopener" title="Source listing">src</a>')
     if ats_url:
-        link_bits.append(f'<a class="tlink" href="{esc(ats_url)}" target="_blank" rel="noopener" title="Apply (ATS)">\U0001F4DD</a>')
+        link_bits.append(f'<a class="tlink" href="{esc(ats_url)}" target="_blank" rel="noopener" title="Apply (ATS)">ats</a>')
     links_cell = "".join(link_bits) or '<span class="prep-no">\u2014</span>'
 
     if prep:
         prep_cell = (f'<a class="tlink prep" href="/prep/{esc(rid)}" target="_blank" '
-                     f'rel="noopener" title="View interview prep">\U0001F4CB</a>')
+                     f'rel="noopener" title="View interview prep">prep</a>')
     else:
         prep_cell = '<span class="prep-no" title="No prep pack yet">\u2014</span>'
 
