@@ -123,11 +123,21 @@ async function decide(id, status, el) {
       body: JSON.stringify({ id, status })
     });
     if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
     const row = el.closest("tr.row");
     row.dataset.status = status;
     row.classList.toggle("row-hidden", status === "hidden");
     row.classList.toggle("row-applied", APPLIED.has(status));
     el.className = "t-status-select status-" + status;
+    // Reflect the applied date the server stamped, in the status cell.
+    const cell = el.closest(".c-status");
+    let ao = cell.querySelector(".t-applied");
+    if (APPLIED.has(status) && data.appliedDate) {
+      if (!ao) { ao = document.createElement("div"); ao.className = "t-applied"; cell.appendChild(ao); }
+      ao.textContent = "Applied " + data.appliedDate;
+    } else if (ao) {
+      ao.remove();
+    }
     toast(status === "new" ? "Restored" : ("Marked " + status));
     applyFilters();
   } catch (e) { toast("Error: " + e.message); }

@@ -69,6 +69,7 @@ async function decide(id, status, el) {
       body: JSON.stringify({ id, status })
     });
     if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
     const card = el.closest(".card");
     card.dataset.status = status;
     card.classList.toggle("hidden-card", status === "hidden");
@@ -76,6 +77,15 @@ async function decide(id, status, el) {
     const badge = card.querySelector(".status");
     badge.className = "status status-" + status;
     badge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    // Reflect the applied date the server stamped (added/updated/removed in place).
+    const meta = card.querySelector(".meta");
+    let ao = card.querySelector(".applied-on");
+    if (APPLIED.has(status) && data.appliedDate) {
+      if (!ao) { ao = document.createElement("span"); ao.className = "applied-on"; meta.appendChild(ao); }
+      ao.innerHTML = '<span class="mk">applied</span>' + data.appliedDate;
+    } else if (ao) {
+      ao.remove();
+    }
     toast(status === "new" ? "Restored" : ("Marked " + status));
     applyFilters();
   } catch (e) { toast("Error: " + e.message); }

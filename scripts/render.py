@@ -249,6 +249,12 @@ def _card(r, dec):
     # Search blob for client-side filtering (includes matched + gap skills)
     blob = _search_blob(r)
 
+    # Applied date: stamped into state.json by serve.py when the role first enters an
+    # applied status. Shown only while the role is in an applied status.
+    applied_date = dec.get("appliedDate")
+    applied_span = (f'<span class="applied-on"><span class="mk">applied</span>{esc(applied_date)}</span>'
+                    if applied and applied_date else "")
+
     status_badge = f'<span class="status status-{esc(status)}">{esc(status).title()}</span>'
     pri_badge = '<span class="pri-badge">Priority</span>' if pri else ""
     prep_badge = '<span class="prep-flag" title="Interview prep pack generated">Prep</span>' if prep else ""
@@ -275,6 +281,7 @@ def _card(r, dec):
         <span><span class="mk">mode</span>{esc(r.get('remoteStatus'))}</span>
         {posted_span}
         <span><span class="mk">src</span>{esc(sources)}</span>
+        {applied_span}
       </div>
       <div class="tags">{tags}</div>
       <div class="rationale">{esc(r.get('rationale'))}</div>
@@ -363,6 +370,10 @@ def _row(r, dec):
         for v, label in (("new", "New"), ("applied", "Applied"), ("interviewing", "Interviewing"),
                          ("offer", "Offer"), ("rejected", "Rejected"), ("hidden", "Hidden")))
 
+    applied_date = dec.get("appliedDate")
+    applied_cell = (f'<div class="t-applied">Applied {esc(applied_date)}</div>'
+                    if applied and applied_date else "")
+
     classes = "row" + (" row-hidden" if hidden else "") + (" row-applied" if applied else "") + (" row-priority" if pri else "")
     pri_dot = '<span class="pri-dot" title="Priority domain">\u25CF</span> ' if pri else ""
     posted_cell = esc(posted) or "\u2014"
@@ -379,7 +390,7 @@ def _row(r, dec):
       <td class="c-posted">{posted_cell}</td>
       <td class="c-src">{esc(sources)}</td>
       <td class="c-status">
-        <select class="t-status-select status-{esc(status)}" onchange="decide('{esc(rid)}', this.value, this)">{status_opts}</select>
+        <select class="t-status-select status-{esc(status)}" onchange="decide('{esc(rid)}', this.value, this)">{status_opts}</select>{applied_cell}
       </td>
       <td class="c-prep">{prep_cell}</td>
       <td class="c-links">{links_cell}</td>

@@ -29,7 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from render import render_html, render_table_html, render_prep_page, load_json, DATA  # noqa: E402
+from render import render_html, render_table_html, render_prep_page, load_json, DATA, APPLIED_STATUSES  # noqa: E402
 from urllib.parse import unquote  # noqa: E402
 
 HOST = os.environ.get("BOARD_HOST", "127.0.0.1")
@@ -63,10 +63,17 @@ def atomic_write_json(path, obj):
 
 def update_decision(role_id, status):
     state = load_json(STATE_PATH, {"schemaVersion": 1, "jobs": {}})
-    state.setdefault("jobs", {})
-    state["jobs"][role_id] = {"status": status, "updatedAt": now_iso()}
+    jobs = state.setdefault("jobs", {})
+    prev = jobs.get(role_id, {})
+    decision = {"status": status, "updatedAt": now_iso()}
+    # Stamp the applied date the first time a role enters an applied status, and
+    # carry it forward through interviewing/offer/rejected. Moving back to
+    # new/hidden drops it, so a later re-apply records a fresh date.
+    if status in APPLIED_STATUSES:
+        decision["appliedDate"] = prev.get("appliedDate") or datetime.date.today().isoformat()
+    jobs[role_id] = decision
     atomic_write_json(STATE_PATH, state)
-    return state
+    return decision
 
 
 def reset_state():
@@ -161,8 +168,9 @@ class Handler(BaseHTTPRequestHandler):
                 rid, status = payload.get("id"), payload.get("status")
                 if not rid or status not in VALID_STATUSES:
                     return self._send(400, {"error": "id and valid status required"})
-                update_decision(rid, status)
-                return self._send(200, {"ok": True, "id": rid, "status": status})
+                decision = update_decision(rid, status)
+                return self._send(200, {"ok": True, "id": rid, "status": status,
+                                        "appliedDate": decision.get("appliedDate")})
 
             if self.path == "/api/queue-cover-letter":
                 payload = self._read_json()
