@@ -216,8 +216,11 @@ def _card(r, dec):
     posted = r.get("postedDate")
     posted_span = f'<span><span class="mk">posted</span>{esc(posted)}</span>' if posted else ""
     # Date the role was added to the board (foundDate, stamped at ingestion).
+    # Pre-pipeline roles carry a backfilled floor (foundDateEstimated): the true
+    # date is unrecorded, so it renders as "≤ date" rather than a precise day.
     added = r.get("foundDate")
-    added_span = f'<span><span class="mk">added</span>{esc(added)}</span>' if added else ""
+    added_disp = f"≤ {added}" if added and r.get("foundDateEstimated") else added
+    added_span = f'<span><span class="mk">added</span>{esc(added_disp)}</span>' if added else ""
 
     # Source + ATS links
     src_url = r.get("sourceUrl") or ""
@@ -364,6 +367,7 @@ def _row(r, dec):
 
     posted = r.get("postedDate") or ""
     added = r.get("foundDate") or ""
+    added_disp = f"≤ {added}" if added and r.get("foundDateEstimated") else added
     salary_val = r.get("salaryMax") or r.get("salaryMin") or 0
     sources = ", ".join(r.get("appearedInSources", [r.get("source", "")]))
 
@@ -411,7 +415,7 @@ def _row(r, dec):
       <td class="c-salary">{esc(salary_str(r))}</td>
       <td class="c-loc">{esc(r.get('location'))}</td>
       <td class="c-posted">{posted_cell}</td>
-      <td class="c-added">{esc(added) or "—"}</td>
+      <td class="c-added">{esc(added_disp) or "—"}</td>
       <td class="c-src">{esc(sources)}</td>
       <td class="c-status">
         <select class="t-status-select status-{esc(status)}" onchange="decide('{esc(rid)}', this.value, this)">{status_opts}</select>{applied_cell}
