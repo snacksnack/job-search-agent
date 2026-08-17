@@ -261,6 +261,9 @@ def _card(r, dec):
     prep_badge = '<span class="prep-flag" title="Interview prep pack generated">Prep</span>' if prep else ""
     closed_badge = (f'<span class="closed-badge" title="No longer on the company\'s live board '
                     f'(detected {esc(r.get("closedDate") or "")})">Closed</span>' if closed else "")
+    rescued_badge = ('<span class="rescued-badge" title="Title did not match the keyword filters; '
+                     'an LLM review judged it in-scope — double-check role scope">Rescued</span>'
+                     if r.get("titleRescued") else "")
     classes = ("card" + (" hidden-card" if hidden else "") + (" applied-card" if applied else "")
                + (" closed-card" if closed else "") + (" priority" if pri else ""))
 
@@ -277,7 +280,7 @@ def _card(r, dec):
           <div class="role-title">{esc(r.get('title'))}</div>
           <div class="company">{esc(r.get('company'))}</div>
         </div>
-        <div class="badges">{pri_badge}{prep_badge}{closed_badge}{status_badge}</div>
+        <div class="badges">{pri_badge}{prep_badge}{rescued_badge}{closed_badge}{status_badge}</div>
       </div>
       <div class="meta">
         <span><span class="mk">pay</span>{esc(salary_str(r))}</span>
@@ -388,6 +391,9 @@ def _row(r, dec):
     pri_dot = '<span class="pri-dot" title="Priority domain">\u25CF</span> ' if pri else ""
     closed_tag = (f'<span class="closed-tag" title="No longer on the company\'s live board '
                   f'(detected {esc(r.get("closedDate") or "")})">closed</span> ' if closed else "")
+    rescued_tag = ('<span class="rescued-tag" title="Title did not match the keyword filters; '
+                   'an LLM review judged it in-scope — double-check role scope">rescued</span> '
+                   if r.get("titleRescued") else "")
     posted_cell = esc(posted) or "\u2014"
     company_key = esc((r.get("company") or "").lower())
     title_key = esc((r.get("title") or "").lower())
@@ -395,7 +401,7 @@ def _row(r, dec):
     return f"""
     <tr class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-prep="{'1' if prep else '0'}" data-priority="{'1' if pri else '0'}" data-closed="{'1' if closed else '0'}" data-score="{r.get('matchPercent', 0)}" data-salary="{salary_val}" data-posted="{esc(posted)}" data-company="{company_key}" data-title="{title_key}">
       <td class="c-score">{r.get('matchPercent', 0)}</td>
-      <td class="c-title">{closed_tag}{pri_dot}{esc(r.get('title'))}</td>
+      <td class="c-title">{closed_tag}{rescued_tag}{pri_dot}{esc(r.get('title'))}</td>
       <td class="c-company">{esc(r.get('company'))}</td>
       <td class="c-salary">{esc(salary_str(r))}</td>
       <td class="c-loc">{esc(r.get('location'))}</td>
