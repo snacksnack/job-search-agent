@@ -215,6 +215,9 @@ def _card(r, dec):
     # Only render the Posted field when we actually have a date (was "Posted \u2014").
     posted = r.get("postedDate")
     posted_span = f'<span><span class="mk">posted</span>{esc(posted)}</span>' if posted else ""
+    # Date the role was added to the board (foundDate, stamped at ingestion).
+    added = r.get("foundDate")
+    added_span = f'<span><span class="mk">added</span>{esc(added)}</span>' if added else ""
 
     # Source + ATS links
     src_url = r.get("sourceUrl") or ""
@@ -273,7 +276,7 @@ def _card(r, dec):
                          ("offer", "Offer"), ("rejected", "Rejected"), ("hidden", "Hidden")))
 
     return f"""
-    <div class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-priority="{'1' if pri else '0'}" data-prep="{'1' if prep else '0'}" data-closed="{'1' if closed else '0'}">
+    <div class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-priority="{'1' if pri else '0'}" data-prep="{'1' if prep else '0'}" data-closed="{'1' if closed else '0'}" data-added="{esc(added or '')}">
       <div class="card-head">
         <div class="match">{r.get('matchPercent', 0)}</div>
         <div class="title-wrap">
@@ -287,6 +290,7 @@ def _card(r, dec):
         <span><span class="mk">loc</span>{esc(r.get('location'))}</span>
         <span><span class="mk">mode</span>{esc(r.get('remoteStatus'))}</span>
         {posted_span}
+        {added_span}
         <span><span class="mk">src</span>{esc(sources)}</span>
         {applied_span}
       </div>
@@ -359,6 +363,7 @@ def _row(r, dec):
     blob = _search_blob(r)
 
     posted = r.get("postedDate") or ""
+    added = r.get("foundDate") or ""
     salary_val = r.get("salaryMax") or r.get("salaryMin") or 0
     sources = ", ".join(r.get("appearedInSources", [r.get("source", "")]))
 
@@ -399,13 +404,14 @@ def _row(r, dec):
     title_key = esc((r.get("title") or "").lower())
 
     return f"""
-    <tr class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-prep="{'1' if prep else '0'}" data-priority="{'1' if pri else '0'}" data-closed="{'1' if closed else '0'}" data-score="{r.get('matchPercent', 0)}" data-salary="{salary_val}" data-posted="{esc(posted)}" data-company="{company_key}" data-title="{title_key}">
+    <tr class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-prep="{'1' if prep else '0'}" data-priority="{'1' if pri else '0'}" data-closed="{'1' if closed else '0'}" data-score="{r.get('matchPercent', 0)}" data-salary="{salary_val}" data-posted="{esc(posted)}" data-added="{esc(added)}" data-company="{company_key}" data-title="{title_key}">
       <td class="c-score">{r.get('matchPercent', 0)}</td>
       <td class="c-title">{closed_tag}{rescued_tag}{pri_dot}{esc(r.get('title'))}</td>
       <td class="c-company">{esc(r.get('company'))}</td>
       <td class="c-salary">{esc(salary_str(r))}</td>
       <td class="c-loc">{esc(r.get('location'))}</td>
       <td class="c-posted">{posted_cell}</td>
+      <td class="c-added">{esc(added) or "—"}</td>
       <td class="c-src">{esc(sources)}</td>
       <td class="c-status">
         <select class="t-status-select status-{esc(status)}" onchange="decide('{esc(rid)}', this.value, this)">{status_opts}</select>{applied_cell}
