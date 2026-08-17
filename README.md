@@ -125,13 +125,15 @@ Other ways to run:
 - **Via Claude:** ask "run my job search" — Claude does LinkedIn discovery in Chrome (dropping raw finds into `data/inbox/`), then invokes `pipeline.py`, then gives you a morning briefing.
 - **Scheduled:** a daily run at **07:00 America/New_York** (configured in `profile.json.schedule`; set up via the schedule skill). Runs on the laptop.
 
-**Fully hands-off (cron).** Because one command now does the whole pipeline, automating it is a single crontab line. To run it every morning at 07:00 and log the output, run `crontab -e` and add (replace the path with your repo location):
+**Fully hands-off (launchd).** The deterministic pipeline runs on its own daily schedule, independent of any Claude session:
 
-```cron
-0 7 * * *  cd /path/to/job-search-agent && /usr/bin/python3 scripts/pipeline.py >> data/cron.log 2>&1
+```bash
+./ops/install-pipeline-schedule.sh
 ```
 
-That's the entire daily job — sweep and re-enrich together, appended to `data/cron.log`. Your Mac must be awake and online at the scheduled time (use `caffeinate` or a `launchd` agent if you want it to fire on wake instead). The pipeline only reaches the ATS APIs from a machine with open network access; it can't run from inside the Cowork sandbox.
+That installs `~/Library/LaunchAgents/com.jobboard.pipeline.plist`, which runs `scripts/pipeline.py` every morning at **07:00** and appends output to `data/logs/pipeline.log`. launchd beats cron here: if the Mac is asleep at 07:00, the job fires at next wake instead of being skipped, and the agent survives reboots without re-arming. The command runs through a login zsh so the Adzuna keys in `~/.zshenv` reach it (launchd agents get no shell environment of their own). The run is idempotent — dedup, backups, and non-fatal sources mean a same-day rerun (e.g. by a Claude session) is harmless. `launchctl kickstart gui/$UID/com.jobboard.pipeline` forces a run now; `launchctl bootout gui/$UID/com.jobboard.pipeline` uninstalls.
+
+With this in place the scheduled Claude run layers judgment on top of already-fresh data — skill-match, title rescue, browser discovery, and the briefing — rather than being the thing that keeps the data fresh.
 
 > **Note:** the pipeline can only reach the ATS APIs from a machine with open network access (i.e. your Mac) — they're not reachable from inside the Cowork sandbox, so run the commands above locally. The deterministic pipeline and board are also designed to lift cleanly to AWS later — `pipeline.py` → a scheduled Lambda, `serve.py`'s handlers → API Gateway + Lambda, and the JSON data → S3 — with no rewrite. For now everything is local.
 
