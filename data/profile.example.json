@@ -22,11 +22,31 @@
     "resumePath": "data/resumes/your-resume.docx",
     "skills": {
       "note": "Canonical skill/experience list derived from your resume. Used as the reference the daily-job-search skill-match subagent compares each job description against. Edit here to tune what counts as a match; re-run the assessment to refresh.",
-      "languages": ["Python", "SQL"],
-      "cloud": ["AWS", "Lambda", "S3"],
-      "data": ["PostgreSQL", "ETL pipelines"],
-      "observability": ["Prometheus", "Grafana", "distributed tracing"],
-      "toolsAndPractices": ["Docker", "Git", "CI/CD", "Agile", "API design & contracts"],
+      "languages": [
+        "Python",
+        "SQL"
+      ],
+      "cloud": [
+        "AWS",
+        "Lambda",
+        "S3"
+      ],
+      "data": [
+        "PostgreSQL",
+        "ETL pipelines"
+      ],
+      "observability": [
+        "Prometheus",
+        "Grafana",
+        "distributed tracing"
+      ],
+      "toolsAndPractices": [
+        "Docker",
+        "Git",
+        "CI/CD",
+        "Agile",
+        "API design & contracts"
+      ],
       "domains": [
         "platform / infrastructure",
         "data / ML platforms",
@@ -58,7 +78,11 @@
       "Forward Deployed Engineer",
       "Senior Forward Deployed Engineer"
     ],
-    "seniorityLevels": ["Senior", "Staff", "Principal"],
+    "seniorityLevels": [
+      "Senior",
+      "Staff",
+      "Principal"
+    ],
     "locationRule": {
       "includeRemoteScope": "US",
       "metroIncludeAnyArrangement": [
@@ -220,7 +244,12 @@
       "Field Engineer",
       "Professional Services Engineer",
       "Delivery Engineer",
-      "Onboarding Engineer"
+      "Onboarding Engineer",
+      "Solution Engineer",
+      "Senior Solution Engineer",
+      "Solution Architect",
+      "Senior Solution Architect",
+      "Solution Consultant"
     ],
     "skipEmployers": [
       "Ladders",
@@ -245,12 +274,21 @@
       "fintech / data products"
     ],
     "secondaryIncludeTitles": {
-      "note": "Adjacent titles that should APPEAR on the board but rank BELOW the primary targetTitles. Technical Project Manager is a coordination-leaning cousin of Technical Program Manager — included, but deliberately scored lower so true Program Manager roles sort above it. Plain non-technical 'Project Manager' is NOT here and stays excluded.",
+      "note": "Adjacent titles that should APPEAR on the board but rank BELOW the primary targetTitles. Technical Project Manager is a coordination-leaning cousin of Technical Program Manager — included, but deliberately scored lower so true Program Manager roles sort above it. Plain non-technical 'Project Manager' is NOT here and stays excluded. 2026-08-17: added Technical Account Manager and Delivery/Engagement-management families (user-approved adjacent scope; these beat category skip rules per title_decision but rank below primary targets).",
       "titles": [
         "Technical Project Manager",
         "Senior Technical Project Manager",
         "Staff Technical Project Manager",
-        "Principal Technical Project Manager"
+        "Principal Technical Project Manager",
+        "Technical Account Manager",
+        "Senior Technical Account Manager",
+        "Engagement Manager",
+        "Senior Engagement Manager",
+        "Delivery Lead",
+        "Delivery Manager",
+        "Technical Delivery Manager",
+        "Implementation Manager",
+        "Senior Implementation Manager"
       ]
     }
   }

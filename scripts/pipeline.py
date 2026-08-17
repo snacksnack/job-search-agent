@@ -65,8 +65,12 @@ PRIORITY_KW = ["platform", "infrastructure", "infra", "data platform", "ml platf
                "aws", "kubernetes", "observability", "reliability", "sre"]
 ADJACENT_KW = ["martech", "marketing technology", "saas", "fintech", "data product"]
 
-# Positive title signals beyond the profile's explicit lists (inclusive default)
-TITLE_KW = ["technical program manager", "tpm", "solutions engineer", "solutions architect",
+# Positive title signals beyond the profile's explicit lists (inclusive default).
+# Both plural and singular "solution(s)" forms: boards use them interchangeably,
+# and the singular is NOT a substring of the plural ("solution engineer" vs
+# "solutions engineer"), so each needs its own entry.
+TITLE_KW = ["technical program manager", "tpm", "solutions engineer", "solution engineer",
+            "solutions architect", "solution architect",
             "forward deployed", "sales engineer", "pre-sales engineer", "implementation engineer",
             "integration engineer", "customer engineer", "deployment engineer", "field engineer",
             "professional services engineer", "delivery engineer", "onboarding engineer",
@@ -727,6 +731,13 @@ def title_decision(title, profile):
     matching = profile.get("matching", {})
     if any(a.lower() in t for a in matching.get("alwaysIncludeTitles", [])):
         return True, None
+    # Explicit secondary includes beat category skips, same as always-includes —
+    # otherwise "Technical Account Manager" dies on the Sales rule's "Account
+    # Manager" substring even when listed as an adjacent include. They still
+    # rank lower via scoring (required=60).
+    secondary = [s.lower() for s in matching.get("secondaryIncludeTitles", {}).get("titles", [])]
+    if any(s in t for s in secondary):
+        return True, None
     for rule in matching.get("skipTitleRules", []):
         for st in rule.get("titles", []):
             if st.lower() in t:
@@ -734,9 +745,6 @@ def title_decision(title, profile):
     targets = [x.lower() for x in profile.get("preferences", {}).get("targetTitles", [])]
     if any(tt in t for tt in targets) or any(k in t for k in TITLE_KW):
         return True, None
-    secondary = [s.lower() for s in matching.get("secondaryIncludeTitles", {}).get("titles", [])]
-    if any(s in t for s in secondary):
-        return True, None              # adjacent title (e.g. Technical Project Manager); ranks lower via scoring
     return False, "titleMismatch: no target-title signal"
 
 
@@ -1121,6 +1129,31 @@ def report_source_health(log):
                   f"0 postings (board empty — may be legit)")
     for s in skipped:
         print(f"  SKIPPED       {_source_key(s)}: {s.get('error', 'credentials not set')}")
+
+
+# --------------------------------------------------------------- title rescue
+# RC1-277: fresh postings rejected ONLY on title go to data/queue/title-rescue.json
+# for a conservative, batched LLM review (titles only) via scripts/title_rescue.py.
+# The queue is replaced each run (yesterday's unreviewed rejects are re-collected
+# tomorrow if still live) and capped to keep the batch cheap.
+RESCUE_QUEUE = "title-rescue.json"
+RESCUE_MAX_PENDING = 400
+RESCUE_MAX_DESC = 2000     # enough for the later cascade checks; --reenrich refills
+
+
+def write_rescue_queue(pending):
+    qdir = DATA / "queue"
+    try:
+        qdir.mkdir(parents=True, exist_ok=True)
+        with open(qdir / RESCUE_QUEUE, "w") as f:
+            json.dump({"date": TODAY, "roles": pending}, f, indent=2, ensure_ascii=False)
+    except OSError as e:                       # rescue is best-effort, never fatal
+        print(f"  title-rescue warning: could not write queue: {e}")
+        return
+    titles = len({(r.get("title") or "").strip().lower() for r in pending})
+    print(f"Title-rescue queue: {len(pending)} title-rejected posting(s) "
+          f"({titles} distinct titles) -> data/queue/{RESCUE_QUEUE} "
+          f"(review via scripts/title_rescue.py --list-pending).")
 
 
 # ------------------------------------------------------------- closed listings
@@ -1560,6 +1593,7 @@ def run(dry_run=False, max_age_days=1):
     new_roles = []
     batch_urls, batch_ids = set(), set()
     changed_active, changed_decided, changed_ids, reassessing = [], [], set(), 0
+    rescue_pending = []
 
     for raw, source in candidates:
         role = normalize(raw, source)
@@ -1611,6 +1645,13 @@ def run(dry_run=False, max_age_days=1):
         if not ok:
             key = reason.split(":")[0]
             skip_breakdown[key] = skip_breakdown.get(key, 0) + 1
+            # RC1-277: keep fresh title-rejects for the LLM title-rescue pass —
+            # nonstandard phrasings ("PgM III", "Delivery Lead") that the keyword
+            # filter can't enumerate. Reviewed via scripts/title_rescue.py.
+            if key == "titleMismatch" and len(rescue_pending) < RESCUE_MAX_PENDING:
+                pending = dict(role)
+                pending["fullDescription"] = (pending.get("fullDescription") or "")[:RESCUE_MAX_DESC]
+                rescue_pending.append(pending)
             continue
 
         # score
@@ -1650,6 +1691,9 @@ def run(dry_run=False, max_age_days=1):
     if dry_run:
         print("(dry run: nothing written)")
         return 0
+
+    if rescue_pending:
+        write_rescue_queue(rescue_pending)
 
     # contentHash is derived from title|location|description, so refresh it on every
     # role at write time — this backfills pre-RC1-278 roles and re-syncs any role
