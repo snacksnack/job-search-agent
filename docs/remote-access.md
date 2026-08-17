@@ -125,7 +125,19 @@ logs in `~/Library/Logs/com.cloudflare.cloudflared.{out,err}.log`) that runs
 while the user is logged in — the same lifecycle as the board server it
 fronts, which is also a login LaunchAgent. A root install (LaunchDaemon, runs
 from boot) would only add a window where the tunnel is up but the board
-isn't. 
+isn't.
+
+> **Gotcha (hit during setup):** `cloudflared service install` (2026.8.2)
+> writes a plist whose `ProgramArguments` is just `cloudflared` with no
+> arguments — which prints "use `cloudflared tunnel run`…" and exits 1 in a
+> KeepAlive crash-loop, so the edge serves **Error 1033**. And the Access
+> wall's 302 does NOT prove the tunnel is up — it's served by the edge
+> before the tunnel matters. Fix: append `tunnel run` to the plist's
+> ProgramArguments (`/usr/libexec/PlistBuddy -c "Add :ProgramArguments:1
+> string tunnel" -c "Add :ProgramArguments:2 string run" …`) and reload;
+> then confirm with `launchctl list | grep cloudflared` (PID + status 0) and
+> "Registered tunnel connection" lines in
+> `~/Library/Logs/com.cloudflare.cloudflared.err.log`. 
 
 The tunnel makes an *outbound* connection from the Mac to Cloudflare — no
 router ports opened, nothing listens on a public interface. `serve.py` stays
@@ -223,8 +235,11 @@ reach the tunnel.
     /api/decision` both returned 302 to the Access login — nothing reached
     the local server; `http://127.0.0.1:8000` unchanged (200).
 13. **Service installed**: `cloudflared service install` (no sudo → user
-    LaunchAgent, login lifecycle matching the board's own agent). Edge check
-    re-verified through the service.
+    LaunchAgent, login lifecycle matching the board's own agent).
+14. **Error 1033 on first real visit**: the installed plist ran `cloudflared`
+    with no args → exit-1 crash-loop (see the Gotcha in Component 3; the
+    Access 302 had masked it). Fixed by appending `tunnel run` to
+    `ProgramArguments` and reloading; 4 QUIC connections registered.
 
 Assigned Cloudflare nameservers: **derek** / **fiona** `.ns.cloudflare.com`.
 Zone also hosts (unchanged, all DNS-only): apex + `blog` + `ftp.blog` +
