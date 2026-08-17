@@ -175,6 +175,7 @@ class AggregatorFetcherTests(unittest.TestCase):
             self.assertEqual(len(out), 1)
             self.assertTrue(out[0]["descriptionTruncated"])
             self.assertEqual(out[0]["salaryMin"], 150000)
+            self.assertEqual(out[0]["remoteStatus"], "remote")
         finally:
             del os.environ["ADZUNA_APP_ID"], os.environ["ADZUNA_APP_KEY"]
 
