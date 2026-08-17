@@ -156,5 +156,44 @@ reach the tunnel.
 
 ## As-executed log
 
-*(filled in as the migration is performed — authoritative record of every
-change made)*
+### 2026-08-17 — DNS migration (IONOS ➜ Cloudflare)
+
+1. **Keep-alive installed** (`ops/install-keepalive.sh`): took over from the
+   manually-started server (old pid 9063 killed); crash-restart verified with
+   a `kill -9`; code-change auto-re-exec verified on a scratch port.
+2. **Cloudflare zone added**: existing account `hihelloreid@gmail.com`, free
+   plan, quick-scan import. Onboarding AI-policy defaults kept except
+   **"Block training in robots.txt" turned OFF** (avoids Cloudflare serving a
+   managed robots.txt on any proxied host).
+3. **Quick-scan gap**: the scan found only 11 of the zone's records. The
+   IONOS DNS panel (filter reset to "Display all records") showed **32
+   records** — the authoritative inventory. Missing from the scan:
+   `incidents` (Vercel), the three IONOS **DKIM** CNAMEs
+   (`s1-ionos`/`s2-ionos`/`s42582890` `._domainkey`), the `_dep_ws_mutex`
+   TXT, all `planner` (Fly.io) and `realestate` (+`www`, MX,
+   autodiscover) records, `blog`'s AAAA/MX/`ftp.blog`/`autodiscover.blog`,
+   and `www.blog`'s AAAA.
+4. **Gap filled**: `incidents A 76.76.21.21` added by hand; the remaining 20
+   records imported via a BIND zone file (every value first confirmed with
+   `dig` against the live IONOS nameservers; the truncated `_dep_ws_mutex`
+   TXT value recovered the same way). The import dialog's "Proxy imported
+   DNS records" checkbox re-checks itself on the confirm step — unchecked
+   before upload.
+5. **All 32 records set to DNS only** (grey cloud). Nothing proxied yet.
+6. **Pre-flip verification**: every record queried against
+   `derek.ns.cloudflare.com` and diffed against the IONOS values — **29/29
+   checks OK** (MX pairs checked together). `dig DS hihelloreid.com` empty →
+   no DNSSEC to disable.
+7. **Nameservers flipped at IONOS** (Name server → Use custom name servers):
+   `derek.ns.cloudflare.com` + `fiona.ns.cloudflare.com`, replacing
+   `ns1022.ui-dns.{com,biz,org,de}`. IONOS confirmed "Name server
+   successfully changed"; its DNS zone is retained (deactivated, not
+   deleted) — switching the nameservers back remains the instant rollback.
+8. Cloudflare notified ("I updated my nameservers"); zone pending
+   activation (registrar propagation, typically 1–2 h).
+
+Assigned Cloudflare nameservers: **derek** / **fiona** `.ns.cloudflare.com`.
+Zone also hosts (unchanged, all DNS-only): apex + `blog` + `ftp.blog` +
+`www.blog` (IONOS webspace), `www` (Heroku), `incidents` (Vercel), `planner`
+(Fly.io), `realestate` + `www.realestate` (DigitalOcean), IONOS mail
+(MX/SPF/DMARC/DKIM/autodiscover), `_domainconnect`, `_dep_ws_mutex`.
