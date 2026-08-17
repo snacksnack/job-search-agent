@@ -36,6 +36,8 @@ data/briefs/
 data/applications/
 # timestamped snapshots of the source-of-truth files (personal data):
 data/backups/
+# launchd agent logs for the keep-alive server (RC1-281):
+data/logs/
 # raw discovery finds dropped by Claude in Chrome:
 data/inbox/
 # transient cover-letter / interview-prep / draft request queues:
