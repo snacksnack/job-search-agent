@@ -12,6 +12,9 @@ def _jobs():
          "rationale": "r"},
         {"id": "beta-b", "company": "Beta", "title": "Solutions Engineer", "url": "http://b",
          "matchPercent": 80, "rationale": "r"},   # legacy role without foundDate
+        {"id": "gamma-c", "company": "Gamma", "title": "Forward Deployed Engineer",
+         "url": "http://c", "matchPercent": 85, "rationale": "r",
+         "foundDate": "2026-06-17", "foundDateEstimated": True},   # backfilled floor
     ]}
 
 
@@ -30,6 +33,14 @@ class BoardDateTests(unittest.TestCase):
         self.assertIn('<td class="c-added">2026-08-15</td>', html)
         self.assertIn('<td class="c-added">—</td>', html)  # legacy role renders a dash
         self.assertIn('data-added="2026-08-15"', html)
+
+    def test_estimated_floor_renders_with_leq_but_sorts_by_raw_date(self):
+        board = render.render_html(_jobs(), {"jobs": {}})
+        self.assertIn('<span class="mk">added</span>≤ 2026-06-17', board)
+        self.assertIn('data-added="2026-06-17"', board)     # sort key stays the raw date
+        table = render.render_table_html(_jobs(), {"jobs": {}})
+        self.assertIn('<td class="c-added">≤ 2026-06-17</td>', table)
+        self.assertIn('data-added="2026-06-17"', table)
 
 
 if __name__ == "__main__":
