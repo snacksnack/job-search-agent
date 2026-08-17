@@ -5,7 +5,7 @@ This is the headless backbone that used to run inside the agent. It does all
 the cheap, deterministic work in plain Python so it costs no tokens:
 
   1. Watchlist sweep   -- fetch each company's Greenhouse/Lever/Ashby/Workable/
-                          SmartRecruiters board via public JSON APIs (no auth, no browser).
+                          SmartRecruiters/Gem board via public JSON APIs (no auth, no browser).
   2. Inbox ingest      -- read raw postings dropped into data/inbox/*.json by
                           Claude in Chrome (the LinkedIn discovery step) and,
                           where the URL is an ATS board, enrich from that API.
@@ -143,6 +143,14 @@ def backup_sources(keep=20):
 
 def http_get_json(url, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": "job-scout/1.0", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def http_post_json(url, payload, timeout=20):
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={
+        "User-Agent": "job-scout/1.0", "Accept": "application/json",
+        "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -303,17 +311,80 @@ def fetch_smartrecruiters(slug, max_pages=10):
     return out
 
 
+# Gem's public job boards (jobs.gem.com/{slug}) are served by an unauthenticated
+# GraphQL endpoint. The list query carries no JD (like SmartRecruiters), so the sweep
+# is list-only and the full description is filled per-posting via enrich/--reenrich.
+GEM_GRAPHQL = "https://jobs.gem.com/api/public/graphql"
+GEM_LIST_QUERY = """query JobBoardList($boardId: String!) {
+  oatsExternalJobPostings(boardId: $boardId) {
+    jobPostings { extId title locations { name city isRemote } job { locationType } }
+  }
+}"""
+GEM_DETAIL_QUERY = """query JobPost($boardId: String!, $extId: String!) {
+  oatsExternalJobPosting(boardId: $boardId, extId: $extId) {
+    title descriptionHtml locations { name city isRemote }
+  }
+}"""
+
+
+def _gem_location(locs, location_type=None):
+    names = [loc.get("name") or loc.get("city") for loc in locs if loc.get("name") or loc.get("city")]
+    location = ", ".join(dict.fromkeys(names))
+    if any(loc.get("isRemote") for loc in locs) or location_type == "REMOTE":
+        location = (location + " (Remote)").strip() if location else "Remote"
+    return location or None
+
+
+def _gem_query(query, variables):
+    data = http_post_json(GEM_GRAPHQL, {"query": query, "variables": variables})
+    if data.get("errors"):
+        raise ValueError(f"gem graphql: {data['errors'][0].get('message', 'error')}")
+    return data.get("data") or {}
+
+
+def fetch_gem(slug):
+    data = _gem_query(GEM_LIST_QUERY, {"boardId": slug})
+    posts = (data.get("oatsExternalJobPostings") or {}).get("jobPostings") or []
+    out = []
+    for j in posts:
+        out.append({
+            "title": j.get("title"),
+            "location": _gem_location(j.get("locations") or [], (j.get("job") or {}).get("locationType")),
+            "url": f"https://jobs.gem.com/{slug}/{j.get('extId')}",
+            "description": "",   # list query carries no JD; filled via --reenrich
+            "postedDate": None,
+            "salaryMin": None, "salaryMax": None, "salaryCurrency": "USD",
+        })
+    return out
+
+
+def _gem_detail(slug, ext_id):
+    """Fetch one Gem posting's full JD (used by enrich/--reenrich)."""
+    d = _gem_query(GEM_DETAIL_QUERY, {"boardId": slug, "extId": ext_id})
+    node = d.get("oatsExternalJobPosting") or {}
+    return {
+        "title": node.get("title"),
+        "location": _gem_location(node.get("locations") or []),
+        "url": f"https://jobs.gem.com/{slug}/{ext_id}",
+        "description": re.sub(r"<[^>]+>", " ", node.get("descriptionHtml") or "").strip(),
+        "postedDate": None,
+        "salaryMin": None, "salaryMax": None, "salaryCurrency": "USD",
+    }
+
+
 ATS_FETCHERS = {
     "greenhouse": fetch_greenhouse,
     "lever": fetch_lever,
     "ashby": fetch_ashby,
     "workable": fetch_workable,
     "smartrecruiters": fetch_smartrecruiters,
+    "gem": fetch_gem,
 }
 
 # Hosts whose postings can be enriched/re-enriched from a public board API. Kept in one
 # place so the inbox-ingest, enrich_from_ats, and --reenrich paths stay in sync.
-ENRICHABLE_HOSTS = ("greenhouse.io", "lever.co", "ashbyhq.com", "workable.com", "smartrecruiters.com")
+ENRICHABLE_HOSTS = ("greenhouse.io", "lever.co", "ashbyhq.com", "workable.com",
+                    "smartrecruiters.com", "jobs.gem.com")
 
 
 # ------------------------------------------------------------------- filtering
@@ -548,19 +619,28 @@ def gather_candidates(search, log):
     """Return list of (raw_posting, source) from watchlist sweep + inbox."""
     candidates = []
 
-    # 1. Watchlist sweep
+    # 1. Watchlist sweep. Each fetch records one of three outcomes: "ok" (N postings),
+    # "empty" (fetch succeeded, board has 0 postings — may be legit), or "error"
+    # (fetch FAILED — bad slug, moved board, network). Failure must stay
+    # distinguishable from an empty board so a dead slug gets noticed.
     for entry in search.get("watchlist", []):
         ats = entry.get("ats"); slug = entry.get("slug"); company = entry.get("company")
         fetcher = ATS_FETCHERS.get(ats)
         if not fetcher or not slug:
             continue
+        rec = {"watchlist": company, "ats": ats, "slug": slug}
         try:
-            for raw in fetcher(slug):
+            postings = fetcher(slug)
+        except urllib.error.HTTPError as e:
+            rec.update(status="error", error=f"HTTP {e.code}")
+        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+            rec.update(status="error", error=str(e))
+        else:
+            for raw in postings:
                 raw["company"] = company
                 candidates.append((raw, ats))
-            log["sources"].append({"watchlist": company, "ats": ats, "status": "ok"})
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as e:
-            log["sources"].append({"watchlist": company, "ats": ats, "status": f"error: {e}"})
+            rec.update(status="ok" if postings else "empty", postings=len(postings))
+        log["sources"].append(rec)
 
     # 2. Inbox ingest (raw finds from Claude in Chrome)
     inbox = DATA / "inbox"
@@ -581,8 +661,65 @@ def gather_candidates(search, log):
                     candidates.append((raw, src))
                 log["sources"].append({"inbox": fp.name, "count": len(items), "status": "ok"})
             except (ValueError, OSError) as e:
-                log["sources"].append({"inbox": fp.name, "status": f"error: {e}"})
+                log["sources"].append({"inbox": fp.name, "status": "error", "error": str(e)})
     return candidates
+
+
+# -------------------------------------------------------------- source health
+FAILURE_STREAK_THRESHOLD = 3   # consecutive failed sweeps before suggesting slug re-resolution
+
+
+def _is_error_status(status):
+    # New entries use status == "error"; pre-2026-08 entries used "error: <detail>".
+    return str(status or "").startswith("error")
+
+
+def _failure_streaks(prev_runs):
+    """Per-company count of consecutive failed watchlist fetches, walking back from
+    the most recent pipeline run. Only pipeline-written run entries (those carrying
+    watchlist records in `sources`) participate; skill-written entries are skipped."""
+    streaks, settled = {}, set()
+    for run_entry in reversed(prev_runs or []):
+        watch = [s for s in run_entry.get("sources", []) if "watchlist" in s]
+        if not watch:
+            continue
+        for s in watch:
+            company = s.get("watchlist")
+            if company in settled:
+                continue
+            if _is_error_status(s.get("status")):
+                streaks[company] = streaks.get(company, 0) + 1
+            else:
+                settled.add(company)
+    return streaks
+
+
+def report_source_health(log):
+    """Summarize watchlist fetch outcomes, annotate failures with their consecutive-
+    failure streak (this run included), and print FAILED/EMPTY lines so a dead slug
+    is visible the same day instead of masquerading as an empty board."""
+    sweep = [s for s in log["sources"] if "watchlist" in s]
+    if not sweep:
+        return
+    failed = [s for s in sweep if _is_error_status(s.get("status"))]
+    empty = [s for s in sweep if s.get("status") == "empty"]
+    ok_n = len(sweep) - len(failed) - len(empty)
+    log["sourceHealth"] = {"ok": ok_n, "empty": len(empty), "failed": len(failed)}
+    print(f"Source health: {ok_n} ok, {len(empty)} empty, {len(failed)} failed "
+          f"(of {len(sweep)} watchlist boards).")
+    if failed:
+        prior = _failure_streaks(load_json(DATA / "search-log.json", {}).get("runs", []))
+        for s in failed:
+            s["failStreak"] = prior.get(s["watchlist"], 0) + 1
+            line = (f"  FETCH FAILED  {s['watchlist']} ({s['ats']}/{s['slug']}): "
+                    f"{s.get('error', '?')} — check slug")
+            if s["failStreak"] >= FAILURE_STREAK_THRESHOLD:
+                line += (f" ({s['failStreak']} runs in a row; re-run slug resolution "
+                         f"via --resolve-ats or update search.json)")
+            print(line)
+    for s in empty:
+        print(f"  EMPTY         {s['watchlist']} ({s['ats']}/{s['slug']}): "
+              f"0 postings (board empty — may be legit)")
 
 
 def enrich_from_ats(url):
@@ -631,6 +768,12 @@ def enrich_from_ats(url):
             if not m:
                 return None
             return _smartrecruiters_detail(m.group(1), m.group(2))
+        elif "jobs.gem.com" in h:
+            # jobs.gem.com/{slug}/{extId}
+            m = re.search(r"jobs\.gem\.com/([^/?#]+)/([^/?#]+)", url)
+            if not m:
+                return None
+            return _gem_detail(m.group(1), m.group(2))
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
         return None
     return None
@@ -720,7 +863,7 @@ def reenrich(dry_run=False, min_gain=200):
 # Map a company -> its ATS apply listing for roles that arrived source-only (LinkedIn
 # / hiring.cafe) and so have no atsUrl. Network-bound: run where the ATS APIs are
 # reachable (the user's Mac), not the sandbox.
-ATS_GUESS_ORDER = ("greenhouse", "lever", "ashby", "workable", "smartrecruiters")
+ATS_GUESS_ORDER = ("greenhouse", "lever", "ashby", "workable", "smartrecruiters", "gem")
 TITLE_MATCH_THRESHOLD = 0.82          # min similarity to confidently attach an apply link
 # Expanded symmetrically on both titles before comparison, so abbreviated board titles
 # ("TPM, ... Ops") match canonical ATS titles ("Technical Program Manager, ... Operations").
@@ -910,6 +1053,7 @@ def run(dry_run=False, max_age_days=1):
     cutoff = (datetime.date.today() - datetime.timedelta(days=max_age_days)).isoformat()
 
     candidates = gather_candidates(search, log)
+    report_source_health(log)
     reviewed = len(candidates)
     new_roles = []
     batch_urls, batch_ids = set(), set()

@@ -130,6 +130,16 @@ Complete example of a valid run entry:
 
 Use Python via Bash to safely read, append, and write `data/search-log.json`.
 
+### Pipeline run entries & source health
+
+`scripts/pipeline.py` appends its own run entries to the same `runs` array with a different shape: `date`, `startedAt`, `sources` (array), `sourceHealth` (object), `counts` (object). Each watchlist record in `sources` is one fetch outcome, and the three cases are deliberately distinct — a failed fetch must never be read as an empty board:
+
+- `{"watchlist": "Acme", "ats": "greenhouse", "slug": "acme", "status": "ok", "postings": 12}` — fetched, N postings
+- `{..., "status": "empty", "postings": 0}` — fetch succeeded but the board has 0 postings (may be legit)
+- `{..., "status": "error", "error": "HTTP 404", "failStreak": 3}` — fetch FAILED (renamed slug, ATS migration, network); `failStreak` counts consecutive failed pipeline runs including this one
+
+`sourceHealth` is the rollup: `{"ok": N, "empty": N, "failed": N}`. The pipeline prints the same information on stdout (`Source health: ...` plus a `FETCH FAILED` line per failure), and once a company hits 3 consecutive failures it suggests re-running slug resolution (`--resolve-ats`) or updating the slug in `search.json`.
+
 ## Final summary
 
 After writing to both `data/jobs.json` and `data/search-log.json`, output a final summary that includes:
@@ -199,6 +209,7 @@ Structure:
 4. **Watchlist candidates** — any similar companies the self-expanding step surfaced for the user to approve adding (do not auto-add).
 5. **Self-tuning proposals** — any matching adjustments proposed this run (with rationale), each requiring the user's explicit yes/no. Never applied silently.
 6. **Run stats** — compact line: searches run, found/reviewed/qualified totals, skip breakdown, expired listings.
-7. **Pointers** — tell the user to start the local board (`python3 scripts/serve.py` → http://127.0.0.1:8000) to review, mark applied, hide, or queue cover letters. Optionally also link a fresh `data/board.html` static snapshot via the file-sharing tool.
+7. **Source health** — only when the pipeline reported fetch failures: one line per failed watchlist board (company, ats/slug, error) so a dead slug gets noticed the same day, with the fix called out for any 3+ run streak (re-run `--resolve-ats` or update the slug in `search.json`). Empty-but-successful boards need no line item; a count is enough. Omit this section entirely when every board fetched.
+8. **Pointers** — tell the user to start the local board (`python3 scripts/serve.py` → http://127.0.0.1:8000) to review, mark applied, hide, or queue cover letters. Optionally also link a fresh `data/board.html` static snapshot via the file-sharing tool.
 
 Tone: concise, friendly, decision-oriented. The user should be able to read it in under a minute and know exactly what's worth acting on today.

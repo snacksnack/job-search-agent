@@ -246,3 +246,70 @@ class LazyReenrichFillTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ------------------------------------------------------------------ Gem (RC1-274 follow-up)
+GEM_LIST_RESPONSE = {
+    "data": {
+        "oatsExternalJobPostings": {
+            "jobPostings": [
+                {"extId": "4003629005", "title": "Senior Technical Program Manager",
+                 "locations": [{"name": "San Francisco", "city": "San Francisco", "isRemote": False},
+                               {"name": "Remote - US", "city": None, "isRemote": True}],
+                 "job": {"locationType": "HYBRID"}},
+                {"extId": "4003629006", "title": "Solutions Engineer",
+                 "locations": [],
+                 "job": {"locationType": "REMOTE"}},
+            ]
+        }
+    }
+}
+
+GEM_DETAIL_RESPONSE = {
+    "data": {
+        "oatsExternalJobPosting": {
+            "title": "Senior Technical Program Manager",
+            "descriptionHtml": "<div><strong>About</strong> the role.</div><p>Drive delivery.</p>",
+            "locations": [{"name": "San Francisco", "city": "San Francisco", "isRemote": False}],
+        }
+    }
+}
+
+
+class GemFetcherTests(unittest.TestCase):
+    def setUp(self):
+        self._orig = pipeline.http_post_json
+        self.posted = []
+
+    def tearDown(self):
+        pipeline.http_post_json = self._orig
+
+    def test_list_only_mapping_and_url_construction(self):
+        def fake_post(url, payload, timeout=20):
+            self.posted.append((url, payload))
+            return GEM_LIST_RESPONSE
+        pipeline.http_post_json = fake_post
+
+        out = pipeline.fetch_gem("retool")
+        self.assertEqual(len(out), 2)
+        self.assertEqual(self.posted[0][0], pipeline.GEM_GRAPHQL)
+        self.assertEqual(self.posted[0][1]["variables"], {"boardId": "retool"})
+        tpm, se = out
+        self.assertEqual(tpm["url"], "https://jobs.gem.com/retool/4003629005")
+        self.assertEqual(tpm["location"], "San Francisco, Remote - US (Remote)")
+        self.assertEqual(tpm["description"], "")   # list carries no JD
+        self.assertEqual(se["location"], "Remote")  # REMOTE locationType, no named locations
+
+    def test_graphql_errors_raise(self):
+        pipeline.http_post_json = lambda url, payload, timeout=20: {
+            "errors": [{"message": "board not found"}]}
+        with self.assertRaises(ValueError):
+            pipeline.fetch_gem("nope")
+
+    def test_enrich_routing_and_detail_fill(self):
+        pipeline.http_post_json = lambda url, payload, timeout=20: GEM_DETAIL_RESPONSE
+        r = pipeline.enrich_from_ats("https://jobs.gem.com/retool/4003629005")
+        self.assertEqual(r["title"], "Senior Technical Program Manager")
+        self.assertIn("Drive delivery.", r["description"])
+        self.assertNotIn("<", r["description"])    # tags stripped
+        self.assertEqual(r["url"], "https://jobs.gem.com/retool/4003629005")
