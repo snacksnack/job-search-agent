@@ -677,10 +677,13 @@ def fetch_agg_adzuna(params):
         return None
     out = []
     for page in range(1, params.get("pages", 2) + 1):
+        # NOTE: Adzuna's `where` is strictly geographic — "remote" geocodes to
+        # nowhere and returns 0 results. Scope to remote via what_and (the word
+        # must appear in the posting) and match the role as an exact phrase.
         q = urllib.parse.urlencode({
             "app_id": app_id, "app_key": app_key,
-            "what": params.get("what", "technical program manager"),
-            "where": params.get("where", "remote"),
+            "what_phrase": params.get("what", "technical program manager"),
+            "what_and": params.get("requireWords", "remote"),
             "results_per_page": params.get("resultsPerPage", 50),
             "salary_min": params.get("salaryMin", 130000)})
         data = http_get_json(f"https://api.adzuna.com/v1/api/jobs/us/search/{page}?{q}")
@@ -695,6 +698,10 @@ def fetch_agg_adzuna(params):
                 "postedDate": _agg_date(j.get("created")),
                 "salaryMin": _to_int(j.get("salary_min")),
                 "salaryMax": _to_int(j.get("salary_max")),
+                # Adzuna reports a geographic location even for remote roles; the
+                # what_and=remote scope means the posting mentions remote, so mark
+                # it remote rather than letting the city read as onsite.
+                "remoteStatus": "remote",
                 "descriptionTruncated": True,
             })
         if not results:
