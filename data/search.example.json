@@ -295,6 +295,13 @@
       "company": "Replit",
       "ats": "ashby",
       "slug": "replit"
+    },
+    {
+      "company": "Example Workday Co",
+      "ats": "workday",
+      "boardUrl": "https://exampleco.wd1.myworkdayjobs.com/External",
+      "cadence": "biweekly",
+      "note": "Unfetchable board (no public API; Workday is never browsed). The pipeline emits a cadence-based manual-check reminder instead — cadence: weekly | biweekly | monthly."
     }
   ],
   "atsApi": {

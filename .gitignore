@@ -20,6 +20,8 @@ data/profile.json
 data/search.json
 # your decisions (applied/hidden/status):
 data/state.json
+# manual-check reminder timestamps (RC1-279):
+data/manual-check-state.json
 # produced output — discovered/matched roles:
 data/jobs.json
 # per-run audit log:
