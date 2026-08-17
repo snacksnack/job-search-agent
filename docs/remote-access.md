@@ -116,8 +116,16 @@ cloudflared tunnel create jobboard          # note the tunnel UUID
 #   {{TUNNEL_ID}} = the UUID, {{HOSTNAME}} = jobs.hihelloreid.com
 cloudflared tunnel route dns jobboard jobs.hihelloreid.com   # creates proxied CNAME
 cloudflared tunnel run jobboard             # foreground smoke test first
-sudo cloudflared service install            # LaunchDaemon: starts at boot, restarts on crash
+cloudflared service install                 # user LaunchAgent: starts at login, restarts on crash
 ```
+
+The service is installed **without sudo** on purpose: that makes it a user
+LaunchAgent (`~/Library/LaunchAgents/com.cloudflare.cloudflared.plist`,
+logs in `~/Library/Logs/com.cloudflare.cloudflared.{out,err}.log`) that runs
+while the user is logged in — the same lifecycle as the board server it
+fronts, which is also a login LaunchAgent. A root install (LaunchDaemon, runs
+from boot) would only add a window where the tunnel is up but the board
+isn't. 
 
 The tunnel makes an *outbound* connection from the Mac to Cloudflare — no
 router ports opened, nothing listens on a public interface. `serve.py` stays
@@ -146,8 +154,8 @@ reach the tunnel.
 - [ ] A status change made through the tunnel appears in local
       `data/state.json`.
 - [ ] Reboot the Mac, log in: board and tunnel come back without manual
-      starts. (`serve.py` = LaunchAgent, at login; `cloudflared` =
-      LaunchDaemon, at boot.)
+      starts. (Both are login LaunchAgents — `com.jobboard.serve` and
+      `com.cloudflare.cloudflared`.)
 - [ ] `http://127.0.0.1:8000` still works unchanged.
 - [ ] `incidents.hihelloreid.com`, `www.hihelloreid.com`,
       `hihelloreid.com`, and IONOS mail unaffected after the NS move.
@@ -191,6 +199,32 @@ reach the tunnel.
    deleted) — switching the nameservers back remains the instant rollback.
 8. Cloudflare notified ("I updated my nameservers"); zone pending
    activation (registrar propagation, typically 1–2 h).
+
+### 2026-08-17 — Tunnel + Access (same evening)
+
+9. **Zone went Active** within minutes of the flip (registrar propagated
+   fast; Cloudflare confirmed while the tunnel was being authorized).
+10. **Tunnel authorized + created**: `cloudflared tunnel login` (cert for
+    zone `hihelloreid.com`), tunnel **`jobboard`**, id
+    `481f8633-3ef5-4366-9a50-14bd21b7ee32`; config rendered from
+    `ops/cloudflared-config.yml.template` to `~/.cloudflared/config.yml`;
+    `cloudflared tunnel route dns jobboard jobs.hihelloreid.com` added the
+    proxied CNAME (the zone's only proxied record).
+11. **Zero Trust set up** (free plan, auto-assigned team name
+    **`super-morning-8df7`** → login page
+    `super-morning-8df7.cloudflareaccess.com`). Access self-hosted app
+    **`jobs`** protecting `jobs.hihelloreid.com` (no path — all routes),
+    policy **`Reid Only`**: Allow, Include Emails =
+    `hi.hello.reid@gmail.com`, One-Time PIN login. (The dashboard UI was set
+    up by hand in the browser; the Claude-in-Chrome extension could not
+    script the Cloudflare One SPA.)
+12. **Access verified before the tunnel went permanent**: with the tunnel
+    running in the foreground, unauthenticated `GET /` and `POST
+    /api/decision` both returned 302 to the Access login — nothing reached
+    the local server; `http://127.0.0.1:8000` unchanged (200).
+13. **Service installed**: `cloudflared service install` (no sudo → user
+    LaunchAgent, login lifecycle matching the board's own agent). Edge check
+    re-verified through the service.
 
 Assigned Cloudflare nameservers: **derek** / **fiona** `.ns.cloudflare.com`.
 Zone also hosts (unchanged, all DNS-only): apex + `blog` + `ftp.blog` +
