@@ -1131,6 +1131,58 @@ def report_source_health(log):
         print(f"  SKIPPED       {_source_key(s)}: {s.get('error', 'credentials not set')}")
 
 
+# -------------------------------------------------------------- manual checks
+# RC1-279: watchlist companies on boards we can't fetch (Workday etc. — no public
+# API, and the search-execution rules forbid browsing Workday) would otherwise
+# fall off the radar. Any watchlist entry without a working fetcher+slug becomes
+# a cadence-based "manually check this board" reminder instead: surfaced in the
+# run output/briefing when due, then stamped in a small local state file.
+CADENCE_DAYS = {"weekly": 7, "biweekly": 14, "monthly": 30}
+MANUAL_CHECK_STATE = "manual-check-state.json"
+
+
+def manual_check_reminders(search, log, dry_run=False):
+    entries = [w for w in search.get("watchlist", [])
+               if not (ATS_FETCHERS.get(w.get("ats")) and w.get("slug"))]
+    if not entries:
+        return []
+    state_path = DATA / MANUAL_CHECK_STATE
+    state = load_json(state_path, {})
+    today = datetime.date.fromisoformat(TODAY)
+    due = []
+    for w in entries:
+        company = w.get("company") or "?"
+        cadence = (w.get("cadence") or "weekly").lower()
+        days = CADENCE_DAYS.get(cadence, 7)
+        last = (state.get(company) or {}).get("lastReminded")
+        try:
+            overdue = last is None or (today - datetime.date.fromisoformat(last)).days >= days
+        except ValueError:
+            overdue = True
+        if overdue:
+            due.append({"company": company, "ats": w.get("ats") or "unknown",
+                        "boardUrl": w.get("boardUrl") or w.get("url") or "",
+                        "cadence": cadence, "lastReminded": last})
+    if not due:
+        return []
+    log["manualChecks"] = due
+    print(f"Manual-check reminders: {len(due)} unfetchable board(s) due — check by "
+          f"hand or via WebSearch snippets, never a logged-in browse:")
+    for d in due:
+        print(f"  CHECK  {d['company']} ({d['ats']}, {d['cadence']}, "
+              f"last reminded {d['lastReminded'] or 'never'}): "
+              f"{d['boardUrl'] or 'no boardUrl set'}")
+    if not dry_run:
+        for d in due:
+            state[d["company"]] = {"lastReminded": TODAY}
+        try:
+            with open(state_path, "w") as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+        except OSError as e:                  # reminders are best-effort, never fatal
+            print(f"  manual-check warning: could not write state: {e}")
+    return due
+
+
 # --------------------------------------------------------------- title rescue
 # RC1-277: fresh postings rejected ONLY on title go to data/queue/title-rescue.json
 # for a conservative, batched LLM review (titles only) via scripts/title_rescue.py.
@@ -1589,6 +1641,7 @@ def run(dry_run=False, max_age_days=1):
     candidates, live_boards = gather_candidates(search, log)
     report_source_health(log)
     mark_closed_listings(existing, live_boards, log)
+    manual_check_reminders(search, log, dry_run=dry_run)
     reviewed = len(candidates)
     new_roles = []
     batch_urls, batch_ids = set(), set()
