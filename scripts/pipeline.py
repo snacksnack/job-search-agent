@@ -5,7 +5,8 @@ This is the headless backbone that used to run inside the agent. It does all
 the cheap, deterministic work in plain Python so it costs no tokens:
 
   1. Watchlist sweep   -- fetch each company's Greenhouse/Lever/Ashby/Workable/
-                          SmartRecruiters/Gem board via public JSON APIs (no auth, no browser).
+                          SmartRecruiters/Gem/Recruitee/BambooHR board via public
+                          JSON APIs (no auth, no browser).
   2. Inbox ingest      -- read raw postings dropped into data/inbox/*.json by
                           Claude in Chrome (the LinkedIn discovery step) and,
                           where the URL is an ATS board, enrich from that API.
@@ -49,8 +50,8 @@ TODAY = datetime.date.today().isoformat()
 ATS_HINTS = (
     "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "workable.com",
     "smartrecruiters.com", "jobvite.com", "icims.com", "bamboohr.com", "breezy.hr",
-    "rippling.com", "gem.com", "teamtailor.com", "paylocity.com", "jobs.openai.com",
-    "openai.com",
+    "rippling.com", "gem.com", "teamtailor.com", "paylocity.com", "recruitee.com",
+    "jobs.openai.com", "openai.com",
 )
 
 # Keyword buckets for domain_bonus (derived from profile priority/adjacent domains)
@@ -311,6 +312,83 @@ def fetch_smartrecruiters(slug, max_pages=10):
     return out
 
 
+def _to_int(v):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_recruitee(slug):
+    """Public Recruitee offers API (no auth). Carries the full JD inline
+    (description + requirements). Salary is used only when the period is yearly —
+    Recruitee boards often list monthly EU salaries (e.g. EUR 2850/month), which
+    would wrongly trip the yearly salary filter."""
+    data = http_get_json(f"https://{slug}.recruitee.com/api/offers/")
+    out = []
+    for j in data.get("offers", []):
+        location = j.get("location") or ""
+        if j.get("remote"):
+            location = (location + " (Remote)").strip() if location else "Remote"
+        html = " ".join(j.get(k) or "" for k in ("description", "requirements"))
+        sal = j.get("salary") or {}
+        yearly = str(sal.get("period") or "").lower().startswith(("year", "annu"))
+        # careers_url may sit on a custom careers domain; the tenant-domain /o/ url
+        # is canonical and host-parseable, so store that one.
+        offer_slug = (j.get("careers_url") or "").rstrip("/").split("/")[-1] or j.get("id")
+        out.append({
+            "title": j.get("title"),
+            "location": location or None,
+            "url": f"https://{slug}.recruitee.com/o/{offer_slug}",
+            "description": re.sub(r"<[^>]+>", " ", html).strip(),
+            "postedDate": (j.get("published_at") or j.get("created_at") or "")[:10] or None,
+            "salaryMin": _to_int(sal.get("min")) if yearly else None,
+            "salaryMax": _to_int(sal.get("max")) if yearly else None,
+            "salaryCurrency": (sal.get("currency") or "USD").upper() if yearly else "USD",
+        })
+    return out
+
+
+def _bamboohr_location(j):
+    loc = j.get("location") or {}
+    location = ", ".join(p for p in (loc.get("city"), loc.get("state")) if p)
+    if j.get("isRemote"):
+        location = (location + " (Remote)").strip() if location else "Remote"
+    return location or None
+
+
+def fetch_bamboohr(slug):
+    """Public BambooHR careers API (no auth). The list endpoint carries no JD, so
+    the sweep is list-only (like SmartRecruiters/Gem); the full description is
+    filled lazily per-posting via enrich_from_ats / --reenrich."""
+    data = http_get_json(f"https://{slug}.bamboohr.com/careers/list")
+    out = []
+    for j in data.get("result") or []:
+        out.append({
+            "title": j.get("jobOpeningName"),
+            "location": _bamboohr_location(j),
+            "url": f"https://{slug}.bamboohr.com/careers/{j.get('id')}",
+            "description": "",   # list endpoint carries no JD; filled via --reenrich
+            "postedDate": None,
+            "salaryMin": None, "salaryMax": None, "salaryCurrency": "USD",
+        })
+    return out
+
+
+def _bamboohr_detail(slug, jid):
+    """Fetch one BambooHR posting's full JD (used by enrich/--reenrich)."""
+    d = http_get_json(f"https://{slug}.bamboohr.com/careers/{jid}/detail")
+    j = (d.get("result") or {}).get("jobOpening") or {}
+    return {
+        "title": j.get("jobOpeningName"),
+        "location": _bamboohr_location(j),
+        "url": f"https://{slug}.bamboohr.com/careers/{jid}",
+        "description": re.sub(r"<[^>]+>", " ", j.get("description") or "").strip(),
+        "postedDate": (j.get("datePosted") or "")[:10] or None,
+        "salaryMin": None, "salaryMax": None, "salaryCurrency": "USD",
+    }
+
+
 # Gem's public job boards (jobs.gem.com/{slug}) are served by an unauthenticated
 # GraphQL endpoint. The list query carries no JD (like SmartRecruiters), so the sweep
 # is list-only and the full description is filled per-posting via enrich/--reenrich.
@@ -379,12 +457,14 @@ ATS_FETCHERS = {
     "workable": fetch_workable,
     "smartrecruiters": fetch_smartrecruiters,
     "gem": fetch_gem,
+    "recruitee": fetch_recruitee,
+    "bamboohr": fetch_bamboohr,
 }
 
 # Hosts whose postings can be enriched/re-enriched from a public board API. Kept in one
 # place so the inbox-ingest, enrich_from_ats, and --reenrich paths stay in sync.
 ENRICHABLE_HOSTS = ("greenhouse.io", "lever.co", "ashbyhq.com", "workable.com",
-                    "smartrecruiters.com", "jobs.gem.com")
+                    "smartrecruiters.com", "jobs.gem.com", "recruitee.com", "bamboohr.com")
 
 
 # ------------------------------------------------------------------- filtering
@@ -821,6 +901,21 @@ def enrich_from_ats(url):
             if not m:
                 return None
             return _gem_detail(m.group(1), m.group(2))
+        elif "recruitee.com" in h:
+            # {slug}.recruitee.com/o/{offer-slug}
+            m = re.search(r"https?://([^.]+)\.recruitee\.com/o/([^/?#]+)", url)
+            if not m:
+                return None
+            slug, offer = m.group(1), m.group(2)
+            for r in fetch_recruitee(slug):
+                if (r.get("url") or "").rstrip("/").endswith("/" + offer):
+                    return r
+        elif "bamboohr.com" in h:
+            # {slug}.bamboohr.com/careers/{id}
+            m = re.search(r"https?://([^.]+)\.bamboohr\.com/careers/(\d+)", url)
+            if not m:
+                return None
+            return _bamboohr_detail(m.group(1), m.group(2))
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
         return None
     return None
@@ -914,7 +1009,8 @@ def reenrich(dry_run=False, min_gain=200):
 # Map a company -> its ATS apply listing for roles that arrived source-only (LinkedIn
 # / hiring.cafe) and so have no atsUrl. Network-bound: run where the ATS APIs are
 # reachable (the user's Mac), not the sandbox.
-ATS_GUESS_ORDER = ("greenhouse", "lever", "ashby", "workable", "smartrecruiters", "gem")
+ATS_GUESS_ORDER = ("greenhouse", "lever", "ashby", "workable", "smartrecruiters", "gem",
+                   "recruitee", "bamboohr")
 TITLE_MATCH_THRESHOLD = 0.82          # min similarity to confidently attach an apply link
 # Expanded symmetrically on both titles before comparison, so abbreviated board titles
 # ("TPM, ... Ops") match canonical ATS titles ("Technical Program Manager, ... Operations").

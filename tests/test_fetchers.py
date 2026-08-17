@@ -313,3 +313,97 @@ class GemFetcherTests(unittest.TestCase):
         self.assertIn("Drive delivery.", r["description"])
         self.assertNotIn("<", r["description"])    # tags stripped
         self.assertEqual(r["url"], "https://jobs.gem.com/retool/4003629005")
+
+
+# --------------------------------------------------- Recruitee + BambooHR (RC1-275)
+RECRUITEE_PAYLOAD = {
+    "offers": [
+        {"id": 2697907, "title": "Senior Technical Program Manager",
+         "location": "Utrecht, Utrecht, Netherlands", "remote": True,
+         "careers_url": "https://jobs.acme.com/o/senior-technical-program-manager-2",
+         "description": "<p>Drive delivery.</p>", "requirements": "<ul><li>10y</li></ul>",
+         "published_at": "2026-08-03 15:40:43 UTC",
+         "salary": {"min": "2850", "max": "2950", "period": "month", "currency": "EUR"}},
+        {"id": 2697908, "title": "Solutions Engineer",
+         "location": "New York, United States", "remote": False,
+         "careers_url": "https://acme.recruitee.com/o/solutions-engineer",
+         "description": "<p>Pre-sales.</p>", "requirements": "",
+         "published_at": "2026-08-04 10:00:00 UTC",
+         "salary": {"min": "150000", "max": "180000", "period": "yearly", "currency": "usd"}},
+    ]
+}
+
+BAMBOO_LIST = {"meta": {"totalCount": 2}, "result": [
+    {"id": 41, "jobOpeningName": "Senior Technical Program Manager",
+     "location": {"city": "Lindon", "state": "UT"}, "isRemote": True},
+    {"id": 42, "jobOpeningName": "Office Manager",
+     "location": {"city": "Austin", "state": "TX"}, "isRemote": False},
+]}
+
+BAMBOO_DETAIL = {"result": {"jobOpening": {
+    "id": 41, "jobOpeningName": "Senior Technical Program Manager",
+    "location": {"city": "Lindon", "state": "UT"}, "isRemote": True,
+    "datePosted": "2026-08-10", "description": "<p>Own cross-functional delivery.</p>",
+}}}
+
+
+class RecruiteeFetcherTests(unittest.TestCase):
+    def setUp(self):
+        self._orig = pipeline.http_get_json
+        pipeline.http_get_json = lambda url, timeout=20: RECRUITEE_PAYLOAD
+
+    def tearDown(self):
+        pipeline.http_get_json = self._orig
+
+    def test_mapping_remote_and_tenant_url(self):
+        out = pipeline.fetch_recruitee("acme")
+        tpm, se = out
+        self.assertEqual(tpm["title"], "Senior Technical Program Manager")
+        self.assertEqual(tpm["location"], "Utrecht, Utrecht, Netherlands (Remote)")
+        # careers_url on a custom domain -> canonical tenant-domain /o/ url is stored
+        self.assertEqual(tpm["url"],
+                         "https://acme.recruitee.com/o/senior-technical-program-manager-2")
+        self.assertIn("Drive delivery.", tpm["description"])
+        self.assertIn("10y", tpm["description"])            # requirements appended
+        self.assertNotIn("<", tpm["description"])           # tags stripped
+        self.assertEqual(tpm["postedDate"], "2026-08-03")
+        self.assertEqual(se["location"], "New York, United States")
+
+    def test_monthly_salary_ignored_yearly_kept(self):
+        tpm, se = pipeline.fetch_recruitee("acme")
+        self.assertIsNone(tpm["salaryMin"])                 # EUR 2850/month must not
+        self.assertIsNone(tpm["salaryMax"])                 # look like yearly pay
+        self.assertEqual(se["salaryMin"], 150000)
+        self.assertEqual(se["salaryMax"], 180000)
+        self.assertEqual(se["salaryCurrency"], "USD")
+
+
+class BambooHRFetcherTests(unittest.TestCase):
+    def setUp(self):
+        self._orig = pipeline.http_get_json
+
+    def tearDown(self):
+        pipeline.http_get_json = self._orig
+
+    def test_list_only_mapping_and_url(self):
+        pipeline.http_get_json = lambda url, timeout=20: BAMBOO_LIST
+        out = pipeline.fetch_bamboohr("acme")
+        tpm, office = out
+        self.assertEqual(tpm["title"], "Senior Technical Program Manager")
+        self.assertEqual(tpm["location"], "Lindon, UT (Remote)")
+        self.assertEqual(tpm["url"], "https://acme.bamboohr.com/careers/41")
+        self.assertEqual(tpm["description"], "")            # list carries no JD
+        self.assertEqual(office["location"], "Austin, TX")
+
+    def test_detail_fill_via_enrich_routing(self):
+        pipeline.http_get_json = lambda url, timeout=20: BAMBOO_DETAIL
+        r = pipeline.enrich_from_ats("https://acme.bamboohr.com/careers/41")
+        self.assertIn("Own cross-functional delivery.", r["description"])
+        self.assertEqual(r["postedDate"], "2026-08-10")
+        self.assertEqual(r["location"], "Lindon, UT (Remote)")
+
+    def test_recruitee_enrich_routing_matches_offer(self):
+        pipeline.http_get_json = lambda url, timeout=20: RECRUITEE_PAYLOAD
+        r = pipeline.enrich_from_ats("https://acme.recruitee.com/o/solutions-engineer")
+        self.assertEqual(r["title"], "Solutions Engineer")
+        self.assertIn("Pre-sales.", r["description"])
