@@ -22,9 +22,17 @@ function currentParams() {
   if (view !== "active") p.set("view", view);
   const prep = document.getElementById("prepFilter").value;
   if (prep && prep !== "all") p.set("prep", prep);
+  // The board owns the date-added sort (its select); other column sorts belong to
+  // the table and are carried through untouched so a round-trip preserves them.
+  const sortSel = document.getElementById("sortSelect").value;
   const url = new URLSearchParams(location.search);
-  if (url.get("sort")) p.set("sort", url.get("sort"));
-  if (url.get("dir")) p.set("dir", url.get("dir"));
+  if (sortSel !== "default") {
+    p.set("sort", "added");
+    p.set("dir", sortSel.endsWith("asc") ? "asc" : "desc");
+  } else if (url.get("sort") && url.get("sort") !== "added") {
+    p.set("sort", url.get("sort"));
+    if (url.get("dir")) p.set("dir", url.get("dir"));
+  }
   return p;
 }
 
@@ -40,10 +48,39 @@ function initFromParams() {
   if (url.has("q")) document.getElementById("search").value = url.get("q");
   const prep = url.get("prep");
   if (prep) document.getElementById("prepFilter").value = prep;
+  if (url.get("sort") === "added") {
+    document.getElementById("sortSelect").value =
+      url.get("dir") === "asc" ? "added-asc" : "added-desc";
+  }
   // Prefer explicit view; fall back to legacy applied=1/hidden=1 links.
   view = url.get("view") ||
     (url.get("applied") === "1" ? "applied" : url.get("hidden") === "1" ? "hidden" : "active");
   syncControls();
+}
+
+// Board sorting: default is the server-rendered order (priority, then match desc);
+// the select re-orders cards in the DOM by data-added, empties last (like the
+// table's posted column). The original order is captured once for restore.
+let initialCardOrder = null;
+function applySortSelect() {
+  const wrap = document.getElementById("cards");
+  if (!initialCardOrder) initialCardOrder = Array.from(wrap.querySelectorAll(".card"));
+  const v = document.getElementById("sortSelect").value;
+  let cards;
+  if (v === "default") {
+    cards = initialCardOrder;
+  } else {
+    const dir = v.endsWith("asc") ? 1 : -1;
+    cards = Array.from(wrap.querySelectorAll(".card")).sort((a, b) => {
+      const va = a.dataset.added || "", vb = b.dataset.added || "";
+      if (va === "" && vb !== "") return 1;      // undated cards sink either way
+      if (vb === "" && va !== "") return -1;
+      const cmp = va < vb ? -1 : (va > vb ? 1 : 0);
+      return dir === 1 ? cmp : -cmp;
+    });
+  }
+  cards.forEach(c => wrap.appendChild(c));
+  refreshViewToggle();
 }
 
 // Reflect the current view in the checkboxes (mutually exclusive) and highlight the
@@ -162,3 +199,4 @@ async function resetState() {
 
 initFromParams();
 applyFilters();
+applySortSelect();

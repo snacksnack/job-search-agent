@@ -209,7 +209,7 @@ Local JSON is the source of truth; there is no Notion. The board is served by `s
 Requirements:
 - Single file, no external runtime dependencies (inline CSS; a CDN script tag is fine but not required).
 - A sortable/scannable card or table layout grouped or sorted by `matchPercent` descending, with priority-domain roles surfaced first.
-- Each role shows: title, company, match %, salary, location, remote status, source, tags, posted date, and a working link to `url`.
+- Each role shows: title, company, match %, salary, location, remote status, source, tags, posted date, date added to the board (`foundDate`), and a working link to `url`. Both views sort by date added (board via the toolbar sort select, table via the Added column), with the sort round-tripping between views through the `sort`/`dir` URL params.
 - Reflect the user's decisions from `state.json`: visually de-emphasize or hide roles marked `hidden`; badge roles by `status` (new / applied / interviewing / etc.).
 - Header shows the run date and counts (new today, total active, top match %).
 - Never invent data — render only what's in `jobs.json`/`state.json`.

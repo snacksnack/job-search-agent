@@ -96,6 +96,7 @@ function cellVal(row, key) {
   if (key === "score") return parseFloat(row.dataset.score) || 0;
   if (key === "salary") return parseFloat(row.dataset.salary) || 0;
   if (key === "posted") return row.dataset.posted || "";
+  if (key === "added") return row.dataset.added || "";
   if (key === "company") return row.dataset.company || "";
   if (key === "title") return row.dataset.title || "";
   return 0;
