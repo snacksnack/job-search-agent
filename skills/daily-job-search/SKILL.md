@@ -72,7 +72,7 @@ Lead with the reliable tier; treat the rest as best-effort and never let a flaky
 
 - **Tier 1 — official ATS APIs** (Greenhouse/Lever/Ashby): plain HTTP, no browser, clean salary + full JD. Used for the watchlist sweep and for enriching discovered postings. Most dependable.
 - **Tier 1.5 — aggregator API feeds** (Remotive, RemoteOK, Himalayas, The Muse, Jobicy, Working Nomads, Adzuna): plain JSON feeds swept automatically by `scripts/pipeline.py` (`searches[]` entries with `method: "api"`) — no browser work needed from this skill. Titles are pre-filtered client-side; qualifying roles enter the normal cascade and get their real ATS link via `--resolve-ats`.
-- **Tier 2 — discovery sources** (hiring.cafe, LinkedIn, Wellfound, Built In NYC): browser-based or unofficial endpoints; searchable by title across companies. Flakier; capture what you can, then enrich via Tier 1 where possible.
+- **Tier 2 — discovery sources** (hiring.cafe, LinkedIn, Wellfound, Built In NYC, WeWorkRemotely): browser-based or unofficial endpoints; searchable by title across companies. Flakier; capture what you can, then enrich via Tier 1 where possible. WeWorkRemotely sits here (not Tier 1.5) because its site Cloudflare-challenges headless clients — browse its category pages per `references/search-execution.md`.
 
 ## Agentic steps
 

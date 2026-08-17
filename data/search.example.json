@@ -177,19 +177,18 @@
       "notes": "Aggregator feed swept headlessly by scripts/pipeline.py (RC1-276); titles pre-filtered client-side, ATS link attached later via --resolve-ats."
     },
     {
-      "id": "agg-weworkremotely",
-      "name": "WeWorkRemotely — category RSS",
-      "source": "weworkremotely",
+      "id": "wwr-browser",
+      "name": "WeWorkRemotely — category pages (browser)",
+      "source": "weWorkRemotely",
       "platform": "weworkremotely",
-      "method": "api",
-      "enabled": false,
-      "params": {
-        "categories": [
-          "remote-project-management-jobs",
-          "remote-management-and-finance-jobs"
-        ]
-      },
-      "notes": "Disabled 2026-08-17: weworkremotely.com serves a Cloudflare challenge (cf-mitigated) to headless clients, so the RSS cannot be fetched from the pipeline. Fetcher is implemented; re-enable if the block lifts."
+      "method": "browser",
+      "enabled": true,
+      "notes": "Browser-tier fallback: weworkremotely.com serves a Cloudflare challenge to headless clients, so the RSS feed (fetch_agg_weworkremotely, kept in pipeline.py) can't run from cron. The daily Claude in Chrome step browses these category pages instead and drops in-scope finds into data/inbox/. If the Cloudflare block ever lifts, switch method back to \"api\" with params.categories.",
+      "resultLimit": 20,
+      "urls": [
+        "https://weworkremotely.com/categories/remote-project-management-jobs",
+        "https://weworkremotely.com/categories/remote-management-and-finance-jobs"
+      ]
     },
     {
       "id": "agg-adzuna",
