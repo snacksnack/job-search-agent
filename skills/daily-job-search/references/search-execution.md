@@ -20,6 +20,10 @@ The public job-board APIs for Greenhouse, Lever, and Ashby return clean JSON (ti
 
 Not every employer uses these three (Workday, iCIMS, and bespoke sites have no clean API) — for those, fall back to whatever the discovery source captured and note the limitation.
 
+## Aggregator API feeds (`method: "api"` — handled by the pipeline, not this skill)
+
+`searches[]` entries with `method: "api"` (Remotive, RemoteOK, Himalayas, The Muse, Jobicy, Working Nomads, WeWorkRemotely, Adzuna) are swept automatically inside `scripts/pipeline.py` — do NOT browse these sites or re-fetch their feeds from the chat. The pipeline pre-filters titles client-side (feeds are remote-generalist, high volume / low relevance), feeds matches into the normal cascade, and reports per-feed health (`matched` vs `scanned`) in the Source health block. Aggregator roles arrive with only a source-page link; run `python3 scripts/pipeline.py --resolve-ats` to attach the real ATS apply link. Adzuna runs only when `ADZUNA_APP_ID`/`ADZUNA_APP_KEY` env vars are set (free key at developer.adzuna.com) and its JDs are truncated — such roles carry `descriptionTruncated: true`. WeWorkRemotely is currently disabled in config (Cloudflare challenge blocks headless fetch; never work around it).
+
 ## Platform execution rules
 
 **linkedin**: Navigate to `url`. For preference-based searches (no keywords), click "Show all" and set Date Posted. For keyword searches, apply all filters from the `filters` object to LinkedIn's UI (keywords, salary, experience level, remote, date). Use the broad-survey sidebar approach: scroll through results calling `get_page_text` at each position to inventory roles, then apply skip rules, then click into relevant roles up to `resultLimit`. Use `get_page_text` to read each JD. Extract `currentJobId` from the URL to build the permalink.

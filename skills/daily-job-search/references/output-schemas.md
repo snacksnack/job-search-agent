@@ -138,7 +138,12 @@ Use Python via Bash to safely read, append, and write `data/search-log.json`.
 - `{..., "status": "empty", "postings": 0}` — fetch succeeded but the board has 0 postings (may be legit)
 - `{..., "status": "error", "error": "HTTP 404", "failStreak": 3}` — fetch FAILED (renamed slug, ATS migration, network); `failStreak` counts consecutive failed pipeline runs including this one
 
-`sourceHealth` is the rollup: `{"ok": N, "empty": N, "failed": N}`. The pipeline prints the same information on stdout (`Source health: ...` plus a `FETCH FAILED` line per failure), and once a company hits 3 consecutive failures it suggests re-running slug resolution (`--resolve-ats`) or updating the slug in `search.json`.
+Aggregator discovery feeds (`searches[]` entries with `method: "api"` — Remotive, RemoteOK, Himalayas, The Muse, Jobicy, Working Nomads, WeWorkRemotely, Adzuna) are swept by the pipeline too and produce sibling records keyed `aggregator` instead of `watchlist`:
+
+- `{"aggregator": "jobicy", "status": "ok", "postings": 14, "scanned": 50}` — `postings` counts title-prefilter matches, `scanned` the feed's raw volume, so a quiet feed (0 matches of 50 scanned) stays distinguishable from a dead one
+- `{"aggregator": "adzuna", "status": "skipped", "error": "ADZUNA_APP_ID/APP_KEY not set"}` — credential-gated feed, skipped, never counted as failed
+
+`sourceHealth` is the rollup: `{"ok": N, "empty": N, "failed": N, "skipped": N}`. The pipeline prints the same information on stdout (`Source health: ...` plus a `FETCH FAILED` line per failure), and once a source hits 3 consecutive failures it suggests re-running slug resolution (`--resolve-ats`) for watchlist boards or updating the feed entry in `search.json`.
 
 ### Change detection (re-seen postings)
 
