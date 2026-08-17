@@ -71,13 +71,16 @@ def list_pending(include_all=False, limit=None, max_desc=DEFAULT_MAX_DESC):
         desc = (r.get("fullDescription") or r.get("description") or "")
         if max_desc and len(desc) > max_desc:
             desc = desc[:max_desc] + " …[truncated]"
-        out.append({
+        row = {
             "id": r.get("id"),
             "company": r.get("company"),
             "title": r.get("title"),
             "location": r.get("location"),
             "description": desc,
-        })
+        }
+        if r.get("descriptionTruncated"):
+            row["descriptionTruncated"] = True   # partial JD (e.g. Adzuna) — assess accordingly
+        out.append(row)
         if limit and len(out) >= limit:
             break
     return out

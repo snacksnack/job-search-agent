@@ -73,7 +73,8 @@ class SourceHealthSweepTests(unittest.TestCase):
         self.assertEqual(by_company["BadCo"]["error"], "HTTP 404")
         self.assertEqual(by_company["BadCo"]["failStreak"], 1)
 
-        self.assertEqual(run_entry["sourceHealth"], {"ok": 1, "empty": 1, "failed": 1})
+        self.assertEqual(run_entry["sourceHealth"],
+                         {"ok": 1, "empty": 1, "failed": 1, "skipped": 0})
         self.assertIn("Source health: 1 ok, 1 empty, 1 failed", out)
         self.assertIn("FETCH FAILED  BadCo (greenhouse/badco): HTTP 404", out)
         self.assertIn("EMPTY         EmptyCo", out)

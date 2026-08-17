@@ -36,11 +36,15 @@ import datetime
 import difflib
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,6 +151,12 @@ def http_get_json(url, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": "job-scout/1.0", "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def http_get_text(url, timeout=20):
+    req = urllib.request.Request(url, headers={"User-Agent": "job-scout/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace")
 
 
 def http_post_json(url, payload, timeout=20):
@@ -468,6 +478,242 @@ ENRICHABLE_HOSTS = ("greenhouse.io", "lever.co", "ashbyhq.com", "workable.com",
                     "smartrecruiters.com", "jobs.gem.com", "recruitee.com", "bamboohr.com")
 
 
+# ------------------------------------------------ aggregator discovery fetchers
+# Plain JSON/RSS feeds (RC1-276) — no auth, no browser, so they run headlessly
+# from cron. These are high-volume remote-generalist boards with weak/no server-
+# side search, so every fetcher pre-filters titles client-side before postings
+# enter the normal normalize -> dedup -> filter -> score cascade. Aggregator
+# roles carry a source-page url only; the --resolve-ats pass attaches the real
+# ATS apply link afterwards.
+AGG_DEFAULT_TERMS = ["program manager", "programme manager", "tpm", "technical program",
+                     "solutions engineer", "solutions architect", "forward deployed",
+                     "sales engineer", "customer engineer", "implementation manager",
+                     "implementation engineer", "delivery manager", "delivery lead",
+                     "technical account manager"]
+
+
+def _title_hit(title, terms):
+    t = (title or "").lower()
+    return any(k in t for k in terms)
+
+
+def _strip_tags(html):
+    return re.sub(r"<[^>]+>", " ", html or "").strip()
+
+
+def _agg_date(v):
+    """Best-effort ISO date from the many formats aggregator feeds use:
+    ISO strings, RFC-822 (RSS pubDate), or epoch seconds. None when unparseable."""
+    if not v:
+        return None
+    if isinstance(v, (int, float)):
+        try:
+            return datetime.datetime.fromtimestamp(v, datetime.timezone.utc).date().isoformat()
+        except (OverflowError, OSError, ValueError):
+            return None
+    s = str(v).strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+        return s[:10]
+    try:
+        return parsedate_to_datetime(s).date().isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_agg_remotive(params):
+    """Remotive's search param is unreliable (often returns the generic latest-jobs
+    feed), so the real filtering is the client-side title pre-filter."""
+    q = urllib.parse.urlencode({"search": params.get("search", "program manager"),
+                                "limit": params.get("limit", 200)})
+    data = http_get_json(f"https://remotive.com/api/remote-jobs?{q}")
+    out = []
+    for j in data.get("jobs", []):
+        out.append({
+            "company": j.get("company_name"),
+            "title": j.get("title"),
+            "location": j.get("candidate_required_location") or "Remote",
+            "url": j.get("url"),
+            "description": _strip_tags(j.get("description")),
+            "postedDate": _agg_date(j.get("publication_date")),
+            "remoteStatus": "remote",   # remote-only feed; location is eligibility scope
+        })
+    return out
+
+
+def fetch_agg_remoteok(params):
+    data = http_get_json("https://remoteok.com/api")
+    out = []
+    for j in data:
+        if not isinstance(j, dict) or "position" not in j:
+            continue                     # first element is a legal/metadata blob
+        out.append({
+            "company": j.get("company"),
+            "title": j.get("position"),
+            "location": j.get("location") or "Remote",
+            "url": j.get("url"),
+            "description": _strip_tags(j.get("description")),
+            "postedDate": _agg_date(j.get("date")),
+            "remoteStatus": "remote",   # remote-only feed; location is eligibility scope
+            "salaryMin": _to_int(j.get("salary_min")),
+            "salaryMax": _to_int(j.get("salary_max")),
+        })
+    return out
+
+
+def fetch_agg_himalayas(params):
+    q = urllib.parse.urlencode({"limit": params.get("limit", 100)})
+    data = http_get_json(f"https://himalayas.app/jobs/api?{q}")
+    out = []
+    for j in data.get("jobs", []):
+        out.append({
+            "company": j.get("companyName"),
+            "title": j.get("title"),
+            "location": ", ".join(j.get("locationRestrictions") or []) or "Remote",
+            "url": j.get("applicationLink") or j.get("guid"),
+            "description": _strip_tags(j.get("description")),
+            "postedDate": _agg_date(j.get("pubDate")),
+            "remoteStatus": "remote",   # remote-only feed; location is eligibility scope
+            "salaryMin": _to_int(j.get("minSalary")),
+            "salaryMax": _to_int(j.get("maxSalary")),
+        })
+    return out
+
+
+def fetch_agg_themuse(params):
+    out = []
+    for page in range(params.get("pages", 3)):
+        q = urllib.parse.urlencode({
+            "category": params.get("category", "Project Management"),
+            "level": params.get("level", "Senior Level"),
+            "location": params.get("location", "Flexible / Remote"),
+            "page": page})
+        data = http_get_json(f"https://www.themuse.com/api/public/jobs?{q}")
+        results = data.get("results", []) or []
+        for j in results:
+            out.append({
+                "company": (j.get("company") or {}).get("name"),
+                "title": j.get("name"),
+                "location": ", ".join(x.get("name", "") for x in j.get("locations", [])) or "Remote",
+                "url": (j.get("refs") or {}).get("landing_page"),
+                "description": _strip_tags(j.get("contents")),
+                "postedDate": _agg_date(j.get("publication_date")),
+            })
+        if not results:
+            break
+    return out
+
+
+def fetch_agg_jobicy(params):
+    q = urllib.parse.urlencode({"count": params.get("count", 50),
+                                "tag": params.get("tag", "program manager")})
+    data = http_get_json(f"https://jobicy.com/api/v2/remote-jobs?{q}")
+    out = []
+    for j in data.get("jobs", []):
+        out.append({
+            "company": j.get("companyName"),
+            "title": j.get("jobTitle"),
+            "location": j.get("jobGeo") or "Remote",
+            "url": j.get("url"),
+            "description": _strip_tags(j.get("jobDescription")),
+            "postedDate": _agg_date(j.get("pubDate")),
+            "remoteStatus": "remote",   # remote-only feed; location is eligibility scope
+            "salaryMin": _to_int(j.get("annualSalaryMin")),
+            "salaryMax": _to_int(j.get("annualSalaryMax")),
+        })
+    return out
+
+
+def fetch_agg_workingnomads(params):
+    data = http_get_json("https://www.workingnomads.com/api/exposed_jobs/")
+    out = []
+    for j in data:
+        out.append({
+            "company": j.get("company_name"),
+            "title": j.get("title"),
+            "location": j.get("locations") or "Remote",
+            "url": j.get("url"),
+            "description": _strip_tags(j.get("description")),
+            "postedDate": _agg_date(j.get("pub_date")),
+            "remoteStatus": "remote",   # remote-only feed; location is eligibility scope
+        })
+    return out
+
+
+WWR_DEFAULT_CATEGORIES = ("remote-project-management-jobs", "remote-management-and-finance-jobs")
+
+
+def fetch_agg_weworkremotely(params):
+    """WeWorkRemotely category RSS. Item titles are 'Company: Job Title'."""
+    out = []
+    for cat in params.get("categories", WWR_DEFAULT_CATEGORIES):
+        xml_text = http_get_text(f"https://weworkremotely.com/categories/{cat}.rss")
+        try:
+            root = ET.fromstring(xml_text)
+        except ET.ParseError as e:
+            raise ValueError(f"RSS parse error: {e}") from e
+        for item in root.iter("item"):
+            raw_title = item.findtext("title") or ""
+            company, _, title = raw_title.partition(": ")
+            if not title:
+                company, title = "", raw_title
+            out.append({
+                "company": company,
+                "title": title,
+                "location": item.findtext("region") or "Remote",
+                "url": item.findtext("link"),
+                "description": _strip_tags(item.findtext("description")),
+                "postedDate": _agg_date(item.findtext("pubDate")),
+                "remoteStatus": "remote",   # remote-only feed; location is eligibility scope
+            })
+    return out
+
+
+def fetch_agg_adzuna(params):
+    """Adzuna needs a free key (developer.adzuna.com) via env vars; returns None
+    (recorded as 'skipped', never an error) when unset. Adzuna truncates JDs, so
+    postings are flagged descriptionTruncated for downstream skill-match."""
+    app_id, app_key = os.environ.get("ADZUNA_APP_ID"), os.environ.get("ADZUNA_APP_KEY")
+    if not (app_id and app_key):
+        return None
+    out = []
+    for page in range(1, params.get("pages", 2) + 1):
+        q = urllib.parse.urlencode({
+            "app_id": app_id, "app_key": app_key,
+            "what": params.get("what", "technical program manager"),
+            "where": params.get("where", "remote"),
+            "results_per_page": params.get("resultsPerPage", 50),
+            "salary_min": params.get("salaryMin", 130000)})
+        data = http_get_json(f"https://api.adzuna.com/v1/api/jobs/us/search/{page}?{q}")
+        results = data.get("results", []) or []
+        for j in results:
+            out.append({
+                "company": (j.get("company") or {}).get("display_name"),
+                "title": j.get("title"),
+                "location": (j.get("location") or {}).get("display_name") or "Remote",
+                "url": j.get("redirect_url"),
+                "description": _strip_tags(j.get("description")),
+                "postedDate": _agg_date(j.get("created")),
+                "salaryMin": _to_int(j.get("salary_min")),
+                "salaryMax": _to_int(j.get("salary_max")),
+                "descriptionTruncated": True,
+            })
+        if not results:
+            break
+    return out
+
+
+AGGREGATOR_FETCHERS = {
+    "remotive": fetch_agg_remotive,
+    "remoteok": fetch_agg_remoteok,
+    "himalayas": fetch_agg_himalayas,
+    "themuse": fetch_agg_themuse,
+    "jobicy": fetch_agg_jobicy,
+    "workingnomads": fetch_agg_workingnomads,
+    "weworkremotely": fetch_agg_weworkremotely,
+    "adzuna": fetch_agg_adzuna,
+}
+
+
 # ------------------------------------------------------------------- filtering
 def title_decision(title, profile):
     t = (title or "").lower()
@@ -652,7 +898,7 @@ def normalize(raw, source):
     # honor explicit fields if the inbox provided them
     source_url = raw.get("sourceUrl", source_url)
     ats_url = raw.get("atsUrl", ats_url)
-    return {
+    out = {
         "id": raw.get("id") or slugify(company, title),
         "company": company,
         "title": title,
@@ -678,6 +924,9 @@ def normalize(raw, source):
         "domain": raw.get("domain", ""),
         "fullDescription": raw.get("fullDescription") or raw.get("description", ""),
     }
+    if raw.get("descriptionTruncated"):
+        out["descriptionTruncated"] = True   # source serves partial JDs (e.g. Adzuna)
+    return out
 
 
 def make_rationale(role, skip_reason=None):
@@ -731,6 +980,40 @@ def gather_candidates(search, log):
             rec.update(status="ok" if postings else "empty", postings=len(postings))
         log["sources"].append(rec)
 
+    # 1b. Aggregator discovery feeds (RC1-276): searches[] entries with
+    # method "api". Same three-outcome health recording as the watchlist,
+    # plus "skipped" for feeds whose credentials are absent (Adzuna).
+    for entry in search.get("searches", []):
+        if entry.get("method") != "api" or not entry.get("enabled", False):
+            continue
+        key = entry.get("platform") or entry.get("source")
+        fetcher = AGGREGATOR_FETCHERS.get(key)
+        if not fetcher:
+            continue
+        source_name = entry.get("source") or key
+        terms = [t.lower() for t in (entry.get("titleFilter") or AGG_DEFAULT_TERMS)]
+        rec = {"aggregator": source_name}
+        try:
+            postings = fetcher(entry.get("params") or {})
+        except urllib.error.HTTPError as e:
+            rec.update(status="error", error=f"HTTP {e.code}")
+        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+            rec.update(status="error", error=str(e))
+        else:
+            if postings is None:
+                rec.update(status="skipped", error="ADZUNA_APP_ID/APP_KEY not set")
+            else:
+                # Client-side title pre-filter: these boards are remote-generalist
+                # (high volume, low relevance) and their server-side search is
+                # weak or absent. Recording scanned vs matched keeps a quiet feed
+                # distinguishable from a dead one.
+                matched = [r for r in postings if _title_hit(r.get("title"), terms)]
+                for raw in matched:
+                    candidates.append((raw, source_name))
+                rec.update(status="ok" if matched else "empty",
+                           postings=len(matched), scanned=len(postings))
+        log["sources"].append(rec)
+
     # 2. Inbox ingest (raw finds from Claude in Chrome)
     inbox = DATA / "inbox"
     if inbox.exists():
@@ -763,52 +1046,74 @@ def _is_error_status(status):
     return str(status or "").startswith("error")
 
 
+def _source_key(s):
+    """Streak/display key for a fetch record: watchlist company or aggregator feed."""
+    return s.get("watchlist") or s.get("aggregator")
+
+
+def _source_detail(s):
+    return f"({s['ats']}/{s['slug']})" if "watchlist" in s else "(feed)"
+
+
 def _failure_streaks(prev_runs):
-    """Per-company count of consecutive failed watchlist fetches, walking back from
-    the most recent pipeline run. Only pipeline-written run entries (those carrying
-    watchlist records in `sources`) participate; skill-written entries are skipped."""
+    """Per-source count of consecutive failed fetches (watchlist companies and
+    aggregator feeds), walking back from the most recent pipeline run. Only
+    pipeline-written run entries (those carrying fetch records in `sources`)
+    participate; skill-written entries are skipped."""
     streaks, settled = {}, set()
     for run_entry in reversed(prev_runs or []):
-        watch = [s for s in run_entry.get("sources", []) if "watchlist" in s]
-        if not watch:
+        recs = [s for s in run_entry.get("sources", []) if _source_key(s)]
+        if not recs:
             continue
-        for s in watch:
-            company = s.get("watchlist")
-            if company in settled:
+        for s in recs:
+            key = _source_key(s)
+            if key in settled:
                 continue
             if _is_error_status(s.get("status")):
-                streaks[company] = streaks.get(company, 0) + 1
+                streaks[key] = streaks.get(key, 0) + 1
             else:
-                settled.add(company)
+                settled.add(key)
     return streaks
 
 
 def report_source_health(log):
-    """Summarize watchlist fetch outcomes, annotate failures with their consecutive-
-    failure streak (this run included), and print FAILED/EMPTY lines so a dead slug
-    is visible the same day instead of masquerading as an empty board."""
-    sweep = [s for s in log["sources"] if "watchlist" in s]
+    """Summarize fetch outcomes (watchlist boards + aggregator feeds), annotate
+    failures with their consecutive-failure streak (this run included), and print
+    FAILED/EMPTY lines so a dead slug or feed is visible the same day instead of
+    masquerading as an empty board."""
+    sweep = [s for s in log["sources"] if _source_key(s)]
     if not sweep:
         return
     failed = [s for s in sweep if _is_error_status(s.get("status"))]
     empty = [s for s in sweep if s.get("status") == "empty"]
-    ok_n = len(sweep) - len(failed) - len(empty)
-    log["sourceHealth"] = {"ok": ok_n, "empty": len(empty), "failed": len(failed)}
-    print(f"Source health: {ok_n} ok, {len(empty)} empty, {len(failed)} failed "
-          f"(of {len(sweep)} watchlist boards).")
+    skipped = [s for s in sweep if s.get("status") == "skipped"]
+    ok_n = len(sweep) - len(failed) - len(empty) - len(skipped)
+    log["sourceHealth"] = {"ok": ok_n, "empty": len(empty), "failed": len(failed),
+                          "skipped": len(skipped)}
+    skip_note = f", {len(skipped)} skipped" if skipped else ""
+    print(f"Source health: {ok_n} ok, {len(empty)} empty, {len(failed)} failed"
+          f"{skip_note} (of {len(sweep)} sources).")
     if failed:
         prior = _failure_streaks(load_json(DATA / "search-log.json", {}).get("runs", []))
         for s in failed:
-            s["failStreak"] = prior.get(s["watchlist"], 0) + 1
-            line = (f"  FETCH FAILED  {s['watchlist']} ({s['ats']}/{s['slug']}): "
-                    f"{s.get('error', '?')} — check slug")
+            s["failStreak"] = prior.get(_source_key(s), 0) + 1
+            hint = "check slug" if "watchlist" in s else "check the feed endpoint"
+            line = (f"  FETCH FAILED  {_source_key(s)} {_source_detail(s)}: "
+                    f"{s.get('error', '?')} — {hint}")
             if s["failStreak"] >= FAILURE_STREAK_THRESHOLD:
-                line += (f" ({s['failStreak']} runs in a row; re-run slug resolution "
-                         f"via --resolve-ats or update search.json)")
+                fix = ("re-run slug resolution via --resolve-ats or update search.json"
+                       if "watchlist" in s else "the feed may have moved; update search.json")
+                line += f" ({s['failStreak']} runs in a row; {fix})"
             print(line)
     for s in empty:
-        print(f"  EMPTY         {s['watchlist']} ({s['ats']}/{s['slug']}): "
-              f"0 postings (board empty — may be legit)")
+        if "scanned" in s:
+            print(f"  EMPTY         {_source_key(s)} {_source_detail(s)}: "
+                  f"0 title matches of {s['scanned']} scanned (quiet day — may be legit)")
+        else:
+            print(f"  EMPTY         {_source_key(s)} {_source_detail(s)}: "
+                  f"0 postings (board empty — may be legit)")
+    for s in skipped:
+        print(f"  SKIPPED       {_source_key(s)}: {s.get('error', 'credentials not set')}")
 
 
 # ------------------------------------------------------------- closed listings

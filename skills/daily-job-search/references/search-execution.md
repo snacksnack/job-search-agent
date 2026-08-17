@@ -20,6 +20,10 @@ The public job-board APIs for Greenhouse, Lever, and Ashby return clean JSON (ti
 
 Not every employer uses these three (Workday, iCIMS, and bespoke sites have no clean API) — for those, fall back to whatever the discovery source captured and note the limitation.
 
+## Aggregator API feeds (`method: "api"` — handled by the pipeline, not this skill)
+
+`searches[]` entries with `method: "api"` (Remotive, RemoteOK, Himalayas, The Muse, Jobicy, Working Nomads, Adzuna) are swept automatically inside `scripts/pipeline.py` — do NOT browse these sites or re-fetch their feeds from the chat. The pipeline pre-filters titles client-side (feeds are remote-generalist, high volume / low relevance), feeds matches into the normal cascade, and reports per-feed health (`matched` vs `scanned`) in the Source health block. Aggregator roles arrive with only a source-page link; run `python3 scripts/pipeline.py --resolve-ats` to attach the real ATS apply link. Adzuna runs only when `ADZUNA_APP_ID`/`ADZUNA_APP_KEY` env vars are set (free key at developer.adzuna.com) and its JDs are truncated — such roles carry `descriptionTruncated: true`. WeWorkRemotely is the exception: its site serves a Cloudflare challenge to headless clients (never work around it), so it runs as a browser search instead — see **weworkremotely** under Platform execution rules.
+
 ## Platform execution rules
 
 **linkedin**: Navigate to `url`. For preference-based searches (no keywords), click "Show all" and set Date Posted. For keyword searches, apply all filters from the `filters` object to LinkedIn's UI (keywords, salary, experience level, remote, date). Use the broad-survey sidebar approach: scroll through results calling `get_page_text` at each position to inventory roles, then apply skip rules, then click into relevant roles up to `resultLimit`. Use `get_page_text` to read each JD. Extract `currentJobId` from the URL to build the permalink.
@@ -41,6 +45,8 @@ Then navigate directly to each result URL to read the full JD via `get_page_text
 **custom — Wellfound**: Startup roles with salary + equity. Browser-based (no official API; anti-bot is aggressive). Navigate to `url`, apply keyword/remote/salary filters via the UI, browse up to `resultLimit`, click into roles for the JD, and follow through to the company's ATS posting where one exists to enrich + capture the canonical URL. Best-effort — if blocked, skip gracefully and note it in the log.
 
 **custom — Built In NYC**: NYC-metro tech/startup roles (relevant because of the NYC-metro side of the location rule). Browser-based. Navigate to `url`, filter by keyword and the NYC location, browse up to `resultLimit`, click into roles, and follow through to the underlying ATS posting to enrich. Because this source is geographically scoped, treat its results as satisfying the NYC-metro branch of the location rule.
+
+**weworkremotely**: Browser-based fallback for the WWR RSS feed (Cloudflare-blocked for headless clients — never attempt the feed or evade the challenge from the chat). Navigate to each URL in the entry's `urls` list (the category pages). Listings render as "Company — Title" rows; scan the visible list via `get_page_text`, keep only roles whose titles match the profile's target titles (TPM / program manager / SE / FDE families), and click into those (up to `resultLimit` total) to capture the posting link, company, title, region, and JD text. Drop finds into `data/inbox/` per the normal inbox schema — the pipeline dedups, filters, and scores them, and `--resolve-ats` attaches the real ATS link. WWR pages are simple and load fast; if the site challenges even the browser session, skip gracefully and note it.
 
 **indeed / custom (other)**: Navigate to `url`, apply filters as available through the site's UI, browse and click into results up to `resultLimit`.
 

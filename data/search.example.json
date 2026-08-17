@@ -103,6 +103,106 @@
         "datePosted": "past24h"
       },
       "enabled": true
+    },
+    {
+      "id": "agg-remotive",
+      "name": "Remotive — remote jobs API",
+      "source": "remotive",
+      "platform": "remotive",
+      "method": "api",
+      "enabled": true,
+      "params": {
+        "search": "program manager",
+        "limit": 200
+      },
+      "notes": "Aggregator feed swept headlessly by scripts/pipeline.py (RC1-276); titles pre-filtered client-side, ATS link attached later via --resolve-ats."
+    },
+    {
+      "id": "agg-remoteok",
+      "name": "RemoteOK — remote jobs API",
+      "source": "remoteok",
+      "platform": "remoteok",
+      "method": "api",
+      "enabled": true,
+      "params": {},
+      "notes": "Aggregator feed swept headlessly by scripts/pipeline.py (RC1-276); titles pre-filtered client-side, ATS link attached later via --resolve-ats."
+    },
+    {
+      "id": "agg-himalayas",
+      "name": "Himalayas — remote jobs API",
+      "source": "himalayas",
+      "platform": "himalayas",
+      "method": "api",
+      "enabled": true,
+      "params": {
+        "limit": 100
+      },
+      "notes": "Aggregator feed swept headlessly by scripts/pipeline.py (RC1-276); titles pre-filtered client-side, ATS link attached later via --resolve-ats."
+    },
+    {
+      "id": "agg-themuse",
+      "name": "The Muse — public jobs API",
+      "source": "themuse",
+      "platform": "themuse",
+      "method": "api",
+      "enabled": true,
+      "params": {
+        "category": "Project Management",
+        "level": "Senior Level",
+        "pages": 3
+      },
+      "notes": "Aggregator feed swept headlessly by scripts/pipeline.py (RC1-276); titles pre-filtered client-side, ATS link attached later via --resolve-ats."
+    },
+    {
+      "id": "agg-jobicy",
+      "name": "Jobicy — remote jobs API",
+      "source": "jobicy",
+      "platform": "jobicy",
+      "method": "api",
+      "enabled": true,
+      "params": {
+        "count": 50,
+        "tag": "program manager"
+      },
+      "notes": "Aggregator feed swept headlessly by scripts/pipeline.py (RC1-276); titles pre-filtered client-side, ATS link attached later via --resolve-ats."
+    },
+    {
+      "id": "agg-workingnomads",
+      "name": "Working Nomads — exposed jobs API",
+      "source": "workingnomads",
+      "platform": "workingnomads",
+      "method": "api",
+      "enabled": true,
+      "params": {},
+      "notes": "Aggregator feed swept headlessly by scripts/pipeline.py (RC1-276); titles pre-filtered client-side, ATS link attached later via --resolve-ats."
+    },
+    {
+      "id": "wwr-browser",
+      "name": "WeWorkRemotely — category pages (browser)",
+      "source": "weWorkRemotely",
+      "platform": "weworkremotely",
+      "method": "browser",
+      "enabled": true,
+      "notes": "Browser-tier fallback: weworkremotely.com serves a Cloudflare challenge to headless clients, so the RSS feed (fetch_agg_weworkremotely, kept in pipeline.py) can't run from cron. The daily Claude in Chrome step browses these category pages instead and drops in-scope finds into data/inbox/. If the Cloudflare block ever lifts, switch method back to \"api\" with params.categories.",
+      "resultLimit": 20,
+      "urls": [
+        "https://weworkremotely.com/categories/remote-project-management-jobs",
+        "https://weworkremotely.com/categories/remote-management-and-finance-jobs"
+      ]
+    },
+    {
+      "id": "agg-adzuna",
+      "name": "Adzuna — search API (needs ADZUNA_APP_ID/APP_KEY env)",
+      "source": "adzuna",
+      "platform": "adzuna",
+      "method": "api",
+      "enabled": true,
+      "params": {
+        "what": "technical program manager",
+        "salaryMin": 130000,
+        "pages": 2
+      },
+      "notes": "Aggregator feed swept headlessly by scripts/pipeline.py (RC1-276); titles pre-filtered client-side, ATS link attached later via --resolve-ats."
     }
   ],
   "watchlist": [
