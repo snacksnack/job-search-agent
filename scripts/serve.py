@@ -24,6 +24,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -36,6 +38,36 @@ HOST = os.environ.get("BOARD_HOST", "127.0.0.1")
 PORT = int(os.environ.get("BOARD_PORT", "8000"))
 
 VALID_STATUSES = {"new", "applied", "interviewing", "rejected", "offer", "hidden"}
+
+# --- auto-restart on code change (RC1-281) ---------------------------------
+# Assets (board.html/css/js) are re-read on every request, but the Python
+# modules are only loaded once per process, so a long-lived server keeps
+# serving whatever serve.py/render.py looked like at startup. Watch their
+# mtimes and re-exec the process when they change; under the launchd
+# keep-alive agent (ops/install-keepalive.sh) this makes merged board changes
+# go live on the next page load with no manual kill.
+_SCRIPTS = Path(__file__).resolve().parent
+_WATCHED = (_SCRIPTS / "serve.py", _SCRIPTS / "render.py")
+
+
+def _code_mtimes():
+    return tuple(p.stat().st_mtime_ns if p.exists() else None for p in _WATCHED)
+
+
+_MTIMES_AT_START = _code_mtimes()
+_restart_pending = threading.Event()
+
+
+def _restart_if_stale(server):
+    """If serve.py/render.py changed on disk, shut the serve loop down (from a
+    side thread -- shutdown() would deadlock called from the loop's own thread)
+    so main() can re-exec with the new code. Idempotent across requests."""
+    if _restart_pending.is_set() or _code_mtimes() == _MTIMES_AT_START:
+        return
+    _restart_pending.set()
+    sys.stderr.write("[board] server code changed on disk -- restarting to pick it up\n")
+    threading.Thread(target=server.shutdown, daemon=True).start()
+# ---------------------------------------------------------------------------
 STATE_PATH = DATA / "state.json"
 JOBS_PATH = DATA / "jobs.json"
 QUEUE_PATH = DATA / "queue" / "cover-letters.json"          # cover-letter requests
@@ -160,6 +192,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, load_json(STATE_PATH, {"jobs": {}}))
         else:
             self._send(404, {"error": "not found"})
+        _restart_if_stale(self.server)
 
     def do_POST(self):
         try:
@@ -197,6 +230,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": str(e)})
         except Exception as e:  # noqa: BLE001
             self._send(500, {"error": str(e)})
+        finally:
+            _restart_if_stale(self.server)
 
 
 def main():
@@ -208,6 +243,13 @@ def main():
     except KeyboardInterrupt:
         print("\nStopped.")
         server.server_close()
+        return
+    server.server_close()
+    if _restart_pending.is_set():
+        # Grace period so the response that triggered the restart finishes
+        # flushing (handler threads are daemonic and die with the process).
+        time.sleep(0.5)
+        os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 if __name__ == "__main__":

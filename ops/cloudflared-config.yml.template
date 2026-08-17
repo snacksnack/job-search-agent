@@ -1,0 +1,13 @@
+# Cloudflare Tunnel config for the job board (RC1-281).
+# Rendered copy lives at ~/.cloudflared/config.yml — see docs/remote-access.md
+# for the full setup runbook. {{TUNNEL_ID}} comes from `cloudflared tunnel create`.
+tunnel: {{TUNNEL_ID}}
+credentials-file: {{HOME}}/.cloudflared/{{TUNNEL_ID}}.json
+
+ingress:
+  # The board — auth happens at the Cloudflare edge (Access policy), so only
+  # authenticated requests ever reach this hostname mapping.
+  - hostname: {{HOSTNAME}}
+    service: http://127.0.0.1:8000
+  # Anything else that hits the tunnel gets a 404.
+  - service: http_status:404

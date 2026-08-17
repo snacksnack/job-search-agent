@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- launchd keep-alive for the local job-board server (RC1-281).
+     Rendered by ops/install-keepalive.sh — {{REPO}} and {{PYTHON}} are
+     substituted at install time; edit the rendered copy in
+     ~/Library/LaunchAgents/, not this template, for machine-local tweaks. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jobboard.serve</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{PYTHON}}</string>
+    <string>{{REPO}}/scripts/serve.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{{REPO}}</string>
+
+  <!-- Start at login, restart on crash. serve.py re-execs itself when its
+       code changes on disk, so KeepAlive never has to serve stale code. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>{{REPO}}/data/logs/serve.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{REPO}}/data/logs/serve.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>BOARD_HOST</key>
+    <string>127.0.0.1</string>
+    <key>BOARD_PORT</key>
+    <string>8000</string>
+  </dict>
+</dict>
+</plist>

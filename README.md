@@ -135,6 +135,10 @@ That's the entire daily job — sweep and re-enrich together, appended to `data/
 
 > **Note:** the pipeline can only reach the ATS APIs from a machine with open network access (i.e. your Mac) — they're not reachable from inside the Cowork sandbox, so run the commands above locally. The deterministic pipeline and board are also designed to lift cleanly to AWS later — `pipeline.py` → a scheduled Lambda, `serve.py`'s handlers → API Gateway + Lambda, and the JSON data → S3 — with no rewrite. For now everything is local.
 
+## Remote access (jobs.hihelloreid.com)
+
+The board can be reached away from the Mac at **https://jobs.hihelloreid.com** — a Cloudflare Tunnel to the local server, gated by a Cloudflare Access email allowlist, so it's still the one local server writing the one local `state.json` (reachable only while the Mac is awake, which is also the only time the data is fresh). Two launchd services keep it hands-off: `ops/install-keepalive.sh` keeps `serve.py` running (start at login, restart on crash, auto-re-exec when the server code changes), and `cloudflared` runs as a LaunchDaemon. Full setup, DNS-migration record, and rollback steps: [`docs/remote-access.md`](docs/remote-access.md).
+
 ## Tests
 
 The deterministic core is covered by a stdlib `unittest` suite in `tests/` (no pip install, no network — ATS calls are mocked). From the repo root:
