@@ -63,6 +63,8 @@ Execute the workflow autonomously. The user has authorized: running `scripts/pip
 
 The deterministic fetch/dedup/filter/score work (old steps 2–6, 8, 11) now lives entirely in `scripts/pipeline.py`. Don't replicate it in the chat — running the script is both cheaper and the canonical implementation.
 
+Note the pipeline also runs on its own daily launchd schedule (`ops/install-pipeline-schedule.sh`, 07:00, no Claude involved), so the data is usually already fresh when this skill runs. Still run step 3 anyway — it's idempotent (dedup + backups make a same-day rerun harmless) and it picks up whatever LinkedIn discovery just dropped into the inbox. This skill's value on top of the schedule is the judgment work: skill-match, title rescue, browser discovery, and the briefing.
+
 ## Search configuration — data/search.json (v2)
 
 `search.json` is the source of truth for which searches run. Only run searches where `enabled` is true; process in array order. Each entry has `id`, `name`, `source`, `platform` (`google` / `hiringCafe` / `linkedin` / `custom` / `ats`), `url`, `method`, `resultLimit`, `targetSites` (google only), `queryTemplate` (optional), and `filters` (`keywords[]`, `excludeKeywords[]`, `salaryMin`, `experienceLevel[]`, `remote`, `datePosted`). Top-level `watchlist` lists companies for direct ATS monitoring; `atsApi` holds the per-provider URL templates. Full execution rules are in `references/search-execution.md`.
