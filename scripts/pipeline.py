@@ -33,6 +33,7 @@ list-only — and rescoring). One command, no second step.
 import argparse
 import datetime
 import difflib
+import hashlib
 import json
 import re
 import shutil
@@ -769,6 +770,46 @@ def mark_closed_listings(roles, live_boards, log=None):
     return closed, reopened
 
 
+# ------------------------------------------------------------ change detection
+def role_content_hash(r):
+    """RC1-278: stable fingerprint of the fields that make a posting's content."""
+    blob = "|".join([r.get("title") or "", r.get("location") or "",
+                     r.get("fullDescription") or r.get("description") or ""])
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def apply_content_change(ex, inc):
+    """Classify a re-seen posting against its stored role; update in place if changed.
+    Returns (changed, desc_changed).
+
+    A list-only sweep row (empty incoming description — SmartRecruiters/Gem) never
+    counts as a description change; a drastically shorter incoming JD (< half the
+    stored one) is treated as a partial fetch rather than a rewrite, so a rich
+    enriched description can't be wiped by a thinner copy of itself; and whitespace
+    is normalized before comparing, since different fetch paths (sweep vs enrich vs
+    browser) strip HTML with different spacing around the same text."""
+    old_desc = ex.get("fullDescription") or ex.get("description") or ""
+    new_desc = inc.get("fullDescription") or ""
+    old_norm, new_norm = " ".join(old_desc.split()), " ".join(new_desc.split())
+    desc_changed = (bool(new_norm) and new_norm != old_norm
+                    and len(new_norm) * 2 >= len(old_norm))
+
+    def _norm(v):     # whitespace-insensitive compare (ATS titles carry stray spaces)
+        return " ".join(v.split()) if isinstance(v, str) else v
+    meta_changed = any(inc.get(k) and _norm(inc.get(k)) != _norm(ex.get(k))
+                       for k in ("title", "location", "salaryMin", "salaryMax"))
+    if not desc_changed and not meta_changed:
+        return False, False
+    for k in ("title", "location", "salaryMin", "salaryMax"):
+        if inc.get(k):
+            ex[k] = inc[k].strip() if isinstance(inc[k], str) else inc[k]
+    if desc_changed:
+        ex["fullDescription"] = new_desc
+    ex["changedDate"] = TODAY
+    ex["contentHash"] = role_content_hash(ex)
+    return True, desc_changed
+
+
 def enrich_from_ats(url):
     """Given an ATS posting URL, fetch the canonical record from the board API."""
     h = host_of(url)
@@ -1095,8 +1136,8 @@ def run(dry_run=False, max_age_days=1):
         return 1
 
     existing = jobs.get("roles", [])
-    seen_urls = {(r.get("url") or "").rstrip("/") for r in existing}
-    seen_ids = {r.get("id") for r in existing}
+    by_id = {r.get("id"): r for r in existing}
+    by_url = {(r.get("url") or "").rstrip("/"): r for r in existing if (r.get("url") or "").strip()}
     decided = set(state.get("jobs", {}).keys())
 
     log = {"date": TODAY, "startedAt": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -1110,15 +1151,41 @@ def run(dry_run=False, max_age_days=1):
     reviewed = len(candidates)
     new_roles = []
     batch_urls, batch_ids = set(), set()
+    changed_active, changed_decided, changed_ids, reassessing = [], [], set(), 0
 
     for raw, source in candidates:
         role = normalize(raw, source)
 
         # dedup (existing + within-batch + already decided)
         ukey = (role["url"] or "").rstrip("/")
-        if role["id"] in seen_ids or role["id"] in batch_ids or role["id"] in decided:
+        ex = (by_url.get(ukey) if ukey else None) or by_id.get(role["id"])
+        if ex is not None:
+            # Same slug id but a different posting url = a sibling listing (same
+            # title, another location/req). That's a distinct posting the id-dedup
+            # collapses, not a content change of the stored role -> plain skip.
+            ex_url = (ex.get("url") or "").rstrip("/")
+            if ukey and ex_url and ukey != ex_url:
+                continue
+            # Re-seen posting (RC1-278): unchanged -> skip as before; changed ->
+            # update the stored role. For undecided roles a changed JD clears the
+            # cached skillMatch (re-assess) and rescores; decided roles get the
+            # data update + changedDate only, so they are never resurfaced.
+            changed, desc_changed = apply_content_change(ex, role)
+            if changed and ex.get("id") not in changed_ids:
+                changed_ids.add(ex.get("id"))
+                if ex.get("id") in decided:
+                    changed_decided.append(ex)
+                else:
+                    if desc_changed and ex.pop("skillMatch", None) is not None:
+                        reassessing += 1
+                    pct, is_priority = score(ex, profile)
+                    ex["matchPercent"], ex["isPriorityDomain"] = pct, is_priority
+                    ex["rationale"] = make_rationale(ex)
+                    changed_active.append(ex)
             continue
-        if ukey and (ukey in seen_urls or ukey in batch_urls):
+        if role["id"] in batch_ids or role["id"] in decided:
+            continue
+        if ukey and ukey in batch_urls:
             continue
 
         # age filter (only when we actually know the posting date)
@@ -1144,12 +1211,26 @@ def run(dry_run=False, max_age_days=1):
         role["isPriorityDomain"] = is_priority
         role["rationale"] = make_rationale(role)
 
+        role["contentHash"] = role_content_hash(role)
         new_roles.append(role)
         batch_ids.add(role["id"])
         if ukey:
             batch_urls.add(ukey)
 
     log["counts"] = {"reviewed": reviewed, "qualified": len(new_roles), "skipped": skip_breakdown}
+    if changed_active or changed_decided:
+        log["changedRoles"] = {
+            "active": [f"{r.get('company')} — {r.get('title')}" for r in changed_active],
+            "decided": [f"{r.get('company')} — {r.get('title')}" for r in changed_decided],
+            "reassessing": reassessing,
+        }
+        print(f"Change detection: {len(changed_active)} re-seen role(s) updated "
+              f"({reassessing} re-assessing), {len(changed_decided)} decided role(s) "
+              f"had JD/detail updates.")
+        for r in changed_active:
+            print(f"  changed           {r.get('company')} — {r.get('title')}")
+        for r in changed_decided:
+            print(f"  changed (decided) {r.get('company')} — {r.get('title')}")
 
     print(f"Reviewed {reviewed} postings -> {len(new_roles)} new qualified roles.")
     if skip_breakdown:
@@ -1161,6 +1242,12 @@ def run(dry_run=False, max_age_days=1):
     if dry_run:
         print("(dry run: nothing written)")
         return 0
+
+    # contentHash is derived from title|location|description, so refresh it on every
+    # role at write time — this backfills pre-RC1-278 roles and re-syncs any role
+    # whose JD was edited by another path (reenrich, resolve-ats, browser enrich).
+    for r in existing:
+        r["contentHash"] = role_content_hash(r)
 
     jobs["roles"] = existing + new_roles
     jobs.setdefault("meta", {})["lastRun"] = TODAY
