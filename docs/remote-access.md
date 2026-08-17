@@ -223,8 +223,8 @@ reach the tunnel.
     `cloudflared tunnel route dns jobboard jobs.hihelloreid.com` added the
     proxied CNAME (the zone's only proxied record).
 11. **Zero Trust set up** (free plan, auto-assigned team name
-    **`super-morning-8df7`** → login page
-    `super-morning-8df7.cloudflareaccess.com`). Access self-hosted app
+    **`super-morning-8df7`**, renamed the same evening to **`hihelloreid`** →
+    login page `hihelloreid.cloudflareaccess.com`). Access self-hosted app
     **`jobs`** protecting `jobs.hihelloreid.com` (no path — all routes),
     policy **`Reid Only`**: Allow, Include Emails =
     `hi.hello.reid@gmail.com`, One-Time PIN login. (The dashboard UI was set
