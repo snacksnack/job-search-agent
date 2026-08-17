@@ -204,6 +204,8 @@
     "ashby": "https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true",
     "workable": "https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true",
     "smartrecruiters": "https://api.smartrecruiters.com/v1/companies/{slug}/postings (list; full JD via .../postings/{id}, filled by --reenrich)",
-    "gem": "https://jobs.gem.com/api/public/graphql (GraphQL, boardId={slug}; list has no JD, filled by --reenrich)"
+    "gem": "https://jobs.gem.com/api/public/graphql (GraphQL, boardId={slug}; list has no JD, filled by --reenrich)",
+    "recruitee": "https://{slug}.recruitee.com/api/offers/ (full JD inline)",
+    "bamboohr": "https://{slug}.bamboohr.com/careers/list (list; full JD via .../careers/{id}/detail, filled by --reenrich)"
   }
 }
