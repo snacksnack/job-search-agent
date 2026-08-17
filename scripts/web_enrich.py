@@ -81,6 +81,8 @@ def _link(r):
 def is_pending(r):
     if r.get("enrichStatus") == "expired":   # confirmed dead posting; don't keep retrying
         return False
+    if r.get("closed"):                      # listing gone from the board; don't enrich
+        return False
     return (not _has_ats(r)) and len(_desc(r)) < THIN_CHARS and bool(_link(r))
 
 

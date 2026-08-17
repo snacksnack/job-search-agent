@@ -616,8 +616,13 @@ def make_rationale(role, skip_reason=None):
 
 # ------------------------------------------------------------------- pipeline
 def gather_candidates(search, log):
-    """Return list of (raw_posting, source) from watchlist sweep + inbox."""
+    """Return (candidates, live_boards): the list of (raw_posting, source) from the
+    watchlist sweep + inbox, plus a per-company snapshot of what is live on each
+    SUCCESSFULLY fetched watchlist board ({company: {"urls", "ids"}}), used by the
+    closed-listing diff. Companies whose fetch errored are absent from live_boards
+    so a network failure can never mass-close their roles."""
     candidates = []
+    live_boards = {}
 
     # 1. Watchlist sweep. Each fetch records one of three outcomes: "ok" (N postings),
     # "empty" (fetch succeeded, board has 0 postings — may be legit), or "error"
@@ -636,9 +641,12 @@ def gather_candidates(search, log):
         except (urllib.error.URLError, TimeoutError, ValueError) as e:
             rec.update(status="error", error=str(e))
         else:
+            board = live_boards.setdefault(company, {"urls": set(), "ids": set()})
             for raw in postings:
                 raw["company"] = company
                 candidates.append((raw, ats))
+                board["urls"].add((raw.get("url") or "").rstrip("/"))
+                board["ids"].add(slugify(company, raw.get("title") or ""))
             rec.update(status="ok" if postings else "empty", postings=len(postings))
         log["sources"].append(rec)
 
@@ -662,7 +670,7 @@ def gather_candidates(search, log):
                 log["sources"].append({"inbox": fp.name, "count": len(items), "status": "ok"})
             except (ValueError, OSError) as e:
                 log["sources"].append({"inbox": fp.name, "status": "error", "error": str(e)})
-    return candidates
+    return candidates, live_boards
 
 
 # -------------------------------------------------------------- source health
@@ -720,6 +728,45 @@ def report_source_health(log):
     for s in empty:
         print(f"  EMPTY         {s['watchlist']} ({s['ats']}/{s['slug']}): "
               f"0 postings (board empty — may be legit)")
+
+
+# ------------------------------------------------------------- closed listings
+def mark_closed_listings(roles, live_boards, log=None):
+    """RC1-273: a role previously open at a SUCCESSFULLY fetched watchlist company
+    that is absent from today's live board gets `closed: true` + `closedDate`.
+
+    Guards:
+      - only companies present in live_boards are diffed (fetch succeeded; a
+        network failure never mass-closes a company's roles);
+      - only roles with a resolved ATS url are diffable (LinkedIn/source-only
+        roles can't be checked against a board);
+      - a role counts as alive if EITHER its url or its company+title slug is on
+        the live board, so a provider-side url-format change can't mass-close;
+      - a closed role that reappears on the live board is reopened (reposts are
+        excluded from re-adding by dedup, so this is the only resurface path).
+    """
+    closed = reopened = 0
+    for r in roles:
+        board = live_boards.get(r.get("company") or "")
+        if board is None or not r.get("atsUrl"):
+            continue
+        url_key = (r.get("atsUrl") or "").rstrip("/")
+        alive = (url_key in board["urls"]
+                 or slugify(r.get("company") or "", r.get("title") or "") in board["ids"])
+        if not alive and not r.get("closed"):
+            r["closed"] = True
+            r["closedDate"] = TODAY
+            closed += 1
+        elif alive and r.get("closed"):
+            r.pop("closed", None)
+            r.pop("closedDate", None)
+            reopened += 1
+    if log is not None:
+        log["closedListings"] = {"companiesDiffed": len(live_boards),
+                                 "closed": closed, "reopened": reopened}
+    print(f"Closed-listing check: {closed} marked closed, {reopened} reopened "
+          f"across {len(live_boards)} successfully-fetched companies.")
+    return closed, reopened
 
 
 def enrich_from_ats(url):
@@ -794,8 +841,11 @@ def reenrich(dry_run=False, min_gain=200):
     jobs = load_json(DATA / "jobs.json", {"schemaVersion": 2, "roles": [], "meta": {}})
     roles = jobs.get("roles", [])
 
-    updated = recleared = no_ats = not_found = unchanged = 0
+    updated = recleared = no_ats = not_found = unchanged = skipped_closed = 0
     for role in roles:
+        if role.get("closed"):          # listing gone from the board; don't refetch
+            skipped_closed += 1
+            continue
         ats_url = role.get("atsUrl") or ""
         if not any(h in host_of(ats_url) for h in ENRICHABLE_HOSTS):
             no_ats += 1
@@ -845,7 +895,8 @@ def reenrich(dry_run=False, min_gain=200):
         updated += 1
 
     print(f"Re-enrich: {updated} updated, {unchanged} already-full, "
-          f"{not_found} not found on ATS, {no_ats} have no ATS url.")
+          f"{not_found} not found on ATS, {no_ats} have no ATS url, "
+          f"{skipped_closed} closed (skipped).")
     if recleared:
         print(f"  Cleared {recleared} cached skill-match assessment(s) for re-assessment.")
     if dry_run:
@@ -955,7 +1006,8 @@ def resolve_ats(dry_run=False, allow_guess=True, limit=None, min_gain=200):
                 known.setdefault((r.get("company") or "").strip().lower(), m)
 
     pending = [r for r in roles
-               if not _has_ats_url(r) and r.get("atsResolveStatus") != "unresolved"]
+               if not _has_ats_url(r) and r.get("atsResolveStatus") != "unresolved"
+               and not r.get("closed")]
     by_company = {}
     for r in pending:
         by_company.setdefault((r.get("company") or "").strip(), []).append(r)
@@ -1052,8 +1104,9 @@ def run(dry_run=False, max_age_days=1):
     skip_breakdown = {}
     cutoff = (datetime.date.today() - datetime.timedelta(days=max_age_days)).isoformat()
 
-    candidates = gather_candidates(search, log)
+    candidates, live_boards = gather_candidates(search, log)
     report_source_health(log)
+    mark_closed_listings(existing, live_boards, log)
     reviewed = len(candidates)
     new_roles = []
     batch_urls, batch_ids = set(), set()

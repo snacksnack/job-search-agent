@@ -1,7 +1,7 @@
 const APPLIED = new Set(["applied", "interviewing", "offer", "rejected"]);
 
 // Which group the board is filtered to. The count chips and the two checkboxes are
-// two synced controls for this one value: active (default) | applied | hidden | all.
+// two synced controls for this one value: active (default) | applied | hidden | closed | all.
 let view = "active";
 
 function toast(msg) {
@@ -74,12 +74,14 @@ function applyFilters() {
     const st = c.dataset.status;
     const isApplied = APPLIED.has(st);
     const isHidden = st === "hidden";
+    const isClosed = c.dataset.closed === "1";
     // Group visibility follows the active view.
     let inView;
     if (view === "all") inView = true;
-    else if (view === "applied") inView = isApplied;
+    else if (view === "applied") inView = isApplied;  // applied stays visible even if the listing closed
     else if (view === "hidden") inView = isHidden;
-    else inView = !isApplied && !isHidden;            // active: neither applied nor hidden
+    else if (view === "closed") inView = isClosed;
+    else inView = !isApplied && !isHidden && !isClosed;  // active: actionable roles only
     let visible = inView && (!q || c.dataset.search.includes(q));
     if (prepFilter === "has" && c.dataset.prep !== "1") visible = false;
     if (prepFilter === "none" && c.dataset.prep === "1") visible = false;

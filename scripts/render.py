@@ -206,6 +206,7 @@ def _card(r, dec):
     status = (dec.get("status") or "new").lower()
     hidden = status == "hidden"
     applied = status in APPLIED_STATUSES
+    closed = bool(r.get("closed"))
     pri = r.get("isPriorityDomain", False)
     prep = has_prep(rid)
 
@@ -258,7 +259,10 @@ def _card(r, dec):
     status_badge = f'<span class="status status-{esc(status)}">{esc(status).title()}</span>'
     pri_badge = '<span class="pri-badge">Priority</span>' if pri else ""
     prep_badge = '<span class="prep-flag" title="Interview prep pack generated">Prep</span>' if prep else ""
-    classes = "card" + (" hidden-card" if hidden else "") + (" applied-card" if applied else "") + (" priority" if pri else "")
+    closed_badge = (f'<span class="closed-badge" title="No longer on the company\'s live board '
+                    f'(detected {esc(r.get("closedDate") or "")})">Closed</span>' if closed else "")
+    classes = ("card" + (" hidden-card" if hidden else "") + (" applied-card" if applied else "")
+               + (" closed-card" if closed else "") + (" priority" if pri else ""))
 
     status_opts = "".join(
         f'<option value="{v}"{" selected" if status == v else ""}>{label}</option>'
@@ -266,14 +270,14 @@ def _card(r, dec):
                          ("offer", "Offer"), ("rejected", "Rejected"), ("hidden", "Hidden")))
 
     return f"""
-    <div class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-priority="{'1' if pri else '0'}" data-prep="{'1' if prep else '0'}">
+    <div class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-priority="{'1' if pri else '0'}" data-prep="{'1' if prep else '0'}" data-closed="{'1' if closed else '0'}">
       <div class="card-head">
         <div class="match">{r.get('matchPercent', 0)}</div>
         <div class="title-wrap">
           <div class="role-title">{esc(r.get('title'))}</div>
           <div class="company">{esc(r.get('company'))}</div>
         </div>
-        <div class="badges">{pri_badge}{prep_badge}{status_badge}</div>
+        <div class="badges">{pri_badge}{prep_badge}{closed_badge}{status_badge}</div>
       </div>
       <div class="meta">
         <span><span class="mk">pay</span>{esc(salary_str(r))}</span>
@@ -307,7 +311,10 @@ def render_html(jobs, state, run_date=None):
     total = len(roles_sorted)
     applied = sum(1 for r in roles_sorted if (decisions.get(r["id"], {}).get("status") or "").lower() in APPLIED_STATUSES)
     hidden = sum(1 for r in roles_sorted if (decisions.get(r["id"], {}).get("status") or "").lower() == "hidden")
-    active = [r for r in roles_sorted if (decisions.get(r["id"], {}).get("status") or "new").lower() not in (APPLIED_STATUSES | {"hidden"})]
+    closed = sum(1 for r in roles_sorted if r.get("closed"))
+    active = [r for r in roles_sorted
+              if (decisions.get(r["id"], {}).get("status") or "new").lower() not in (APPLIED_STATUSES | {"hidden"})
+              and not r.get("closed")]
     top_match = max((r.get("matchPercent", 0) for r in active), default=0)
 
     cards = "".join(_card(r, decisions.get(r["id"], {})) for r in roles_sorted)
@@ -323,6 +330,7 @@ def render_html(jobs, state, run_date=None):
         "{{TOTAL}}": str(total),
         "{{APPLIED}}": str(applied),
         "{{HIDDEN}}": str(hidden),
+        "{{CLOSED}}": str(closed),
         "{{SHOWN}}": str(len(active)),
         "{{TOP_MATCH}}": str(top_match),
         "{{GENERATED}}": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -342,6 +350,7 @@ def _row(r, dec):
     status = (dec.get("status") or "new").lower()
     hidden = status == "hidden"
     applied = status in APPLIED_STATUSES
+    closed = bool(r.get("closed"))
     pri = r.get("isPriorityDomain", False)
     prep = has_prep(rid)
     blob = _search_blob(r)
@@ -374,16 +383,19 @@ def _row(r, dec):
     applied_cell = (f'<div class="t-applied">Applied {esc(applied_date)}</div>'
                     if applied and applied_date else "")
 
-    classes = "row" + (" row-hidden" if hidden else "") + (" row-applied" if applied else "") + (" row-priority" if pri else "")
+    classes = ("row" + (" row-hidden" if hidden else "") + (" row-applied" if applied else "")
+               + (" row-closed" if closed else "") + (" row-priority" if pri else ""))
     pri_dot = '<span class="pri-dot" title="Priority domain">\u25CF</span> ' if pri else ""
+    closed_tag = (f'<span class="closed-tag" title="No longer on the company\'s live board '
+                  f'(detected {esc(r.get("closedDate") or "")})">closed</span> ' if closed else "")
     posted_cell = esc(posted) or "\u2014"
     company_key = esc((r.get("company") or "").lower())
     title_key = esc((r.get("title") or "").lower())
 
     return f"""
-    <tr class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-prep="{'1' if prep else '0'}" data-priority="{'1' if pri else '0'}" data-score="{r.get('matchPercent', 0)}" data-salary="{salary_val}" data-posted="{esc(posted)}" data-company="{company_key}" data-title="{title_key}">
+    <tr class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-prep="{'1' if prep else '0'}" data-priority="{'1' if pri else '0'}" data-closed="{'1' if closed else '0'}" data-score="{r.get('matchPercent', 0)}" data-salary="{salary_val}" data-posted="{esc(posted)}" data-company="{company_key}" data-title="{title_key}">
       <td class="c-score">{r.get('matchPercent', 0)}</td>
-      <td class="c-title">{pri_dot}{esc(r.get('title'))}</td>
+      <td class="c-title">{closed_tag}{pri_dot}{esc(r.get('title'))}</td>
       <td class="c-company">{esc(r.get('company'))}</td>
       <td class="c-salary">{esc(salary_str(r))}</td>
       <td class="c-loc">{esc(r.get('location'))}</td>
@@ -407,7 +419,10 @@ def render_table_html(jobs, state, run_date=None):
     total = len(roles_sorted)
     applied = sum(1 for r in roles_sorted if (decisions.get(r["id"], {}).get("status") or "").lower() in APPLIED_STATUSES)
     hidden = sum(1 for r in roles_sorted if (decisions.get(r["id"], {}).get("status") or "").lower() == "hidden")
-    active = [r for r in roles_sorted if (decisions.get(r["id"], {}).get("status") or "new").lower() not in (APPLIED_STATUSES | {"hidden"})]
+    closed = sum(1 for r in roles_sorted if r.get("closed"))
+    active = [r for r in roles_sorted
+              if (decisions.get(r["id"], {}).get("status") or "new").lower() not in (APPLIED_STATUSES | {"hidden"})
+              and not r.get("closed")]
     top_match = max((r.get("matchPercent", 0) for r in active), default=0)
 
     rows = "".join(_row(r, decisions.get(r["id"], {})) for r in roles_sorted)
@@ -421,6 +436,7 @@ def render_table_html(jobs, state, run_date=None):
         "{{TOTAL}}": str(total),
         "{{APPLIED}}": str(applied),
         "{{HIDDEN}}": str(hidden),
+        "{{CLOSED}}": str(closed),
         "{{SHOWN}}": str(len(active)),
         "{{TOP_MATCH}}": str(top_match),
         "{{GENERATED}}": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),

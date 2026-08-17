@@ -1,7 +1,7 @@
 const APPLIED = new Set(["applied", "interviewing", "offer", "rejected"]);
 
 // Which group the table is filtered to. Count chips + checkboxes are two synced
-// controls for this one value: active (default) | applied | hidden | all.
+// controls for this one value: active (default) | applied | hidden | closed | all.
 let view = "active";
 
 // Table-owned sort state. null => server's default order (priority, then match desc).
@@ -75,11 +75,13 @@ function applyFilters() {
     const st = r.dataset.status;
     const isApplied = APPLIED.has(st);
     const isHidden = st === "hidden";
+    const isClosed = r.dataset.closed === "1";
     let inView;
     if (view === "all") inView = true;
-    else if (view === "applied") inView = isApplied;
+    else if (view === "applied") inView = isApplied;  // applied stays visible even if the listing closed
     else if (view === "hidden") inView = isHidden;
-    else inView = !isApplied && !isHidden;            // active: neither applied nor hidden
+    else if (view === "closed") inView = isClosed;
+    else inView = !isApplied && !isHidden && !isClosed;  // active: actionable roles only
     let visible = inView && (!q || r.dataset.search.includes(q));
     if (prepFilter === "has" && r.dataset.prep !== "1") visible = false;
     if (prepFilter === "none" && r.dataset.prep === "1") visible = false;

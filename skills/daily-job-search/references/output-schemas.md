@@ -140,6 +140,10 @@ Use Python via Bash to safely read, append, and write `data/search-log.json`.
 
 `sourceHealth` is the rollup: `{"ok": N, "empty": N, "failed": N}`. The pipeline prints the same information on stdout (`Source health: ...` plus a `FETCH FAILED` line per failure), and once a company hits 3 consecutive failures it suggests re-running slug resolution (`--resolve-ats`) or updating the slug in `search.json`.
 
+### Closed-listing detection
+
+After the sweep, the pipeline diffs previously-stored roles against each **successfully fetched** watchlist board. A role with a resolved `atsUrl` whose company fetched ok but which is absent from the live board gets `closed: true` and `closedDate` (YYYY-MM-DD) on the role in `jobs.json`; a closed role that reappears is reopened (the fields are removed). Companies whose fetch failed are never diffed, so a network error can't mass-close roles. Source-only roles (no resolved ATS link) are not diffable. The run entry records the rollup as `closedListings`: `{"companiesDiffed": N, "closed": N, "reopened": N}`. Closed roles are excluded from re-enrich, ATS-resolution, skill-match, and browser-enrichment queues; the board shows them struck through with a Closed badge, excludes them from the active view, and gives them their own count chip.
+
 ## Final summary
 
 After writing to both `data/jobs.json` and `data/search-log.json`, output a final summary that includes:
@@ -208,7 +212,7 @@ Structure:
 3. **Company briefs** — for roles that got a brief this run, a one-line pointer to `data/briefs/{id}.md`.
 4. **Watchlist candidates** — any similar companies the self-expanding step surfaced for the user to approve adding (do not auto-add).
 5. **Self-tuning proposals** — any matching adjustments proposed this run (with rationale), each requiring the user's explicit yes/no. Never applied silently.
-6. **Run stats** — compact line: searches run, found/reviewed/qualified totals, skip breakdown, expired listings.
+6. **Run stats** — compact line: searches run, found/reviewed/qualified totals, skip breakdown, expired listings, and — when nonzero — how many listings were marked closed this run (call out by name any closed role the user had applied to or was interviewing for).
 7. **Source health** — only when the pipeline reported fetch failures: one line per failed watchlist board (company, ats/slug, error) so a dead slug gets noticed the same day, with the fix called out for any 3+ run streak (re-run `--resolve-ats` or update the slug in `search.json`). Empty-but-successful boards need no line item; a count is enough. Omit this section entirely when every board fetched.
 8. **Pointers** — tell the user to start the local board (`python3 scripts/serve.py` → http://127.0.0.1:8000) to review, mark applied, hide, or queue cover letters. Optionally also link a fresh `data/board.html` static snapshot via the file-sharing tool.
 

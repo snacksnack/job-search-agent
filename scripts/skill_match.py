@@ -64,6 +64,8 @@ def list_pending(include_all=False, limit=None, max_desc=DEFAULT_MAX_DESC):
     jobs = load_jobs()
     out = []
     for r in jobs.get("roles", []):
+        if r.get("closed"):             # listing gone from the board; skip assessment
+            continue
         if not include_all and r.get("skillMatch"):
             continue
         desc = (r.get("fullDescription") or r.get("description") or "")
