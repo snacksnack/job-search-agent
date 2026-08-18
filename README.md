@@ -66,6 +66,7 @@ All of these are **local and git-ignored** — they're your personal data and pr
 | `jobs.json` | Master list of discovered roles — **source of truth** | `scripts/pipeline.py` (roles); `scripts/skill_match.py` (the `skillMatch` block per role) | ignored |
 | `state.json` | **Your** applied/hidden/status decisions — **source of truth** | `scripts/serve.py` (board buttons); the pipeline only reads it | ignored |
 | `search-log.json` | Per-run audit log | `scripts/pipeline.py` (append) | ignored |
+| `logs/rejects-YYYY-MM-DD.jsonl` | Every rejected posting and the rule that rejected it | `scripts/pipeline.py` (append) | ignored |
 | `inbox/` | Raw LinkedIn finds awaiting ingest | Claude in Chrome | ignored |
 | `queue/cover-letters.json` | Cover-letter requests from the board | `scripts/serve.py` | ignored |
 | `board.html` | Optional static snapshot (live board is the server) | `scripts/render.py` | ignored |
@@ -80,6 +81,20 @@ Tracked in git: the scripts, the skills, and the generic `*.example.json` templa
 
 - **Tier 1 — official ATS APIs** (Greenhouse/Lever/Ashby/Workable/SmartRecruiters): the dependable backbone for the watchlist sweep and enrichment.
 - **Tier 2 — discovery sources** (hiring.cafe, LinkedIn, Wellfound, Built In NYC): browser/unofficial; searchable by title across companies. Flakier — captured best-effort, then enriched via Tier 1 where possible. A flaky source never blocks the run.
+
+## Why a role didn't show up
+
+Every run prints a skip breakdown (`Skips: expired=7692, titleMismatch=483, …`), but counts alone can't answer "why isn't *this* role on my board?". So each rejected posting is also appended to `data/logs/rejects-YYYY-MM-DD.jsonl` — one JSON object per line carrying the posting's identity and the exact rule that rejected it, split into the `reason` bucket the breakdown counts and the `detail` it drops:
+
+```bash
+# what happened to a specific company's postings today
+grep -i '"company": "Anthropic"' data/logs/rejects-$(date +%F).jsonl | python3 -m json.tool --json-lines
+
+# which title rules are doing the most work
+python3 -c 'import json,sys,collections; print(collections.Counter(json.loads(l)["detail"] for l in sys.stdin if json.loads(l)["reason"]=="titleMismatch").most_common(10))' < data/logs/rejects-$(date +%F).jsonl
+```
+
+Appended, not overwritten, so a second run the same day adds to the day's file; the newest 14 days are kept. `--dry-run` writes nothing. Expect ~8k lines (~3 MB) a day, most of them `expired` — a posting older than `--max-age-days`, which is the usual answer.
 
 ## Running it on your Mac
 

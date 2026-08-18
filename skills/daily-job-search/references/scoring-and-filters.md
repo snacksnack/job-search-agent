@@ -85,3 +85,5 @@ When `preferences.agentic.selfTuningMatching` is on, the daily run inspects `dat
 - Consistently **hidden** roles sharing a domain, company stage, salary band, or sub-family → propose a new `descriptionSkips` entry, a `skipTitleRules` addition, or a `salaryTarget` bump.
 - Consistently **applied/starred** roles sharing a domain → propose promoting that domain into `priorityDomains`.
 - Record every proposal with timestamp + rationale in `data/tuning-log.json`, and present them in the morning briefing for the user to accept or decline. Apply only on explicit confirmation.
+
+The signals above are all revealed *after* a role reaches the board. For the other direction — a filter that is too tight, so a role the user would have wanted never arrived — read `data/logs/rejects-YYYY-MM-DD.jsonl`. It records one line per rejected posting with its identity, the `reason` bucket, and the `detail` naming the exact rule that fired (e.g. `titleMismatch` / `Sales (non-technical)`). Use it to answer "why didn't role X show up?" directly, and to spot a `detail` that is rejecting far more than it should before proposing a `skipTitleRules` change.
