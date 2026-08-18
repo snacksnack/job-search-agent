@@ -49,6 +49,10 @@ def make_profile():
             },
         },
         "matching": {
+            "leadershipOverrideTitles": [
+                "Manager, Sales Engineering", "Sales Engineering Manager",
+                "Manager of Solutions Engineering",
+            ],
             "alwaysIncludeTitles": [
                 "Technical Program Manager", "Senior Technical Program Manager",
                 "Solutions Engineer", "Forward Deployed Engineer", "Sales Engineer",
