@@ -36,6 +36,29 @@ class TitleDecisionTests(unittest.TestCase):
         self.assertFalse(self._ok("Director of Engineering"))
         self.assertFalse(self._ok("VP of Platform"))
 
+    # Manager-of-team titles must lose even when they contain an always-include
+    # substring ("Senior Manager, Sales Engineering" contains "Sales Engineer").
+    def test_manager_of_team_excluded_despite_always_include(self):
+        ok, reason = pipeline.title_decision(
+            "Senior Manager, Sales Engineering - Majors, NY/NJ", self.p)
+        self.assertFalse(ok)
+        self.assertIn("people-leadership", reason)
+        self.assertFalse(self._ok("Sales Engineering Manager"))
+        self.assertFalse(self._ok("Manager of Solutions Engineering, East"))
+
+    def test_ic_manager_titles_survive_leadership_overrides(self):
+        self.assertTrue(self._ok("Technical Program Manager, Infrastructure"))
+        self.assertTrue(self._ok("Sales Engineer"))
+        self.assertTrue(self._ok("Senior Solutions Engineer"))
+
+    # "Program Manager, <team>" embeds the "Manager, <team>" leadership shape
+    # but is IC — the program/project/product prefix guard must let it through.
+    def test_program_manager_of_team_is_not_leadership(self):
+        self.assertTrue(self._ok("Program Manager, Sales Engineering"))
+        ok, reason = pipeline.title_decision(
+            "Technical Program Manager, Sales Engineering", self.p)
+        self.assertTrue(ok)
+
 
 class ScoringTests(unittest.TestCase):
     def setUp(self):

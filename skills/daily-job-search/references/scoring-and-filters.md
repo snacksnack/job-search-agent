@@ -19,7 +19,7 @@ Profile fields used here:
 
 ## Title skip rules
 
-Skip a role without clicking if its title matches any entry in `matching.skipTitleRules`. Each rule has a `category` (for logging under `titleMismatch`) and `titles` (the matching terms). If a title matches both a skip rule AND an entry in `matching.alwaysIncludeTitles`, ALWAYS include it — the always-include list wins. When a title is ambiguous, click in and review; only skip when it's obvious from the title.
+Skip a role without clicking if its title matches any entry in `matching.skipTitleRules`. Each rule has a `category` (for logging under `titleMismatch`) and `titles` (the matching terms). If a title matches both a skip rule AND an entry in `matching.alwaysIncludeTitles`, ALWAYS include it — the always-include list wins. One exception outranks even the always-include list: `matching.leadershipOverrideTitles`, checked first of all. These are Manager-of-a-team phrasings ("Manager, Sales Engineering", "Solutions Engineering Manager") — people-leadership roles whose titles happen to contain an always-include substring like "Sales Engineer"; they are rejected as `titleMismatch: Seniority too high (people-leadership)`. When a title is ambiguous, click in and review; only skip when it's obvious from the title.
 
 ## Recruiter / aggregator postings
 
@@ -43,7 +43,7 @@ Exclude a role only when it is **hybrid or onsite and tied to a location outside
 
 ## Seniority filtering
 
-Include roles at the levels in `{seniorityLevels}` (Senior, Staff, Principal). Skip roles clearly below (intern / junior / associate / entry / new-grad / mid) and clearly above into people-leadership (Director / Head / VP / Chief) — these are also encoded in `matching.skipTitleRules` so the title-skip pass catches most of them. Note: many target titles contain the word "Manager" (e.g. "Technical Program Manager") — never skip those on the word "Manager"; the `alwaysIncludeTitles` list protects them. When seniority is unclear from the title, click in and judge from the JD's scope/requirements.
+Include roles at the levels in `{seniorityLevels}` (Senior, Staff, Principal). Skip roles clearly below (intern / junior / associate / entry / new-grad / mid) and clearly above into people-leadership — Director / Head / VP / Chief via `matching.skipTitleRules`, and Manager-of-a-team titles ("Senior Manager, Sales Engineering") via `matching.leadershipOverrideTitles`, which beats even the always-include list. Note: many target titles contain the word "Manager" (e.g. "Technical Program Manager") — never skip those on the word "Manager" alone; the `alwaysIncludeTitles` list protects them, and the leadership overrides only match Manager-of-a-team phrasings (team name after "Manager," / "Manager of", or before "... Manager"), never the IC "<function> Manager" shape — and a "Manager, <team>" match is ignored when "Manager" is directly preceded by Program/Project/Product, so IC titles like "Program Manager, Professional Services" survive. When seniority is unclear from the title, click in and judge from the JD's scope/requirements.
 
 ## Deduplication
 

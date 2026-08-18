@@ -726,9 +726,31 @@ AGGREGATOR_FETCHERS = {
 
 
 # ------------------------------------------------------------------- filtering
+# IC titles like "Program Manager, Professional Services" embed the leadership
+# shape "Manager, <team>" — the word before "Manager" decides which one it is.
+_IC_MANAGER_PREFIXES = ("program ", "project ", "product ")
+
+
+def _leadership_title_hit(phrase, t):
+    start = t.find(phrase)
+    while start >= 0:
+        if not phrase.startswith("manager") or not t[:start].endswith(_IC_MANAGER_PREFIXES):
+            return True
+        start = t.find(phrase, start + 1)
+    return False
+
+
 def title_decision(title, profile):
     t = (title or "").lower()
     matching = profile.get("matching", {})
+    # People-leadership overrides beat the always-include list: "Senior Manager,
+    # Sales Engineering" contains "sales engineer", and skip rules only run
+    # after always-include (whose seniority tier also starts at Director), so
+    # Manager-of-team titles need this pre-check. A bare "Manager" term can't
+    # go in skip rules — the core IC targets are Manager titles (TPM etc.).
+    for lo in matching.get("leadershipOverrideTitles", []):
+        if _leadership_title_hit(lo.lower(), t):
+            return False, "titleMismatch: Seniority too high (people-leadership)"
     if any(a.lower() in t for a in matching.get("alwaysIncludeTitles", [])):
         return True, None
     # Explicit secondary includes beat category skips, same as always-includes —
