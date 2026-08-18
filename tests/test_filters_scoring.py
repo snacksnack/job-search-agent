@@ -59,6 +59,12 @@ class TitleDecisionTests(unittest.TestCase):
             "Technical Program Manager, Sales Engineering", self.p)
         self.assertTrue(ok)
 
+    # Deliberately greedy on the Program Management family: Manager-of-TPM-org
+    # titles are not in the override list — the user hides misses manually
+    # rather than risk filtering out a match.
+    def test_manager_of_program_management_org_included(self):
+        self.assertTrue(self._ok("Senior Manager, Technical Program Management"))
+
 
 class ScoringTests(unittest.TestCase):
     def setUp(self):

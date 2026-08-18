@@ -55,6 +55,7 @@ def make_profile():
             ],
             "alwaysIncludeTitles": [
                 "Technical Program Manager", "Senior Technical Program Manager",
+                "Technical Program Management",
                 "Solutions Engineer", "Forward Deployed Engineer", "Sales Engineer",
                 "Solutions Architect",
             ],
