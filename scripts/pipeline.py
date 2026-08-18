@@ -1230,6 +1230,59 @@ def write_rescue_queue(pending):
           f"(review via scripts/title_rescue.py --list-pending).")
 
 
+# --------------------------------------------------------------- rejects log
+REJECTS_PREFIX = "rejects-"
+REJECTS_KEEP_DAYS = 14
+
+
+def reject_record(role, reason, started_at):
+    """One rejected posting, flattened for the JSONL log. `reason` is the full
+    filter string ("salaryTooLow: max 165000 < target 190000"); it splits into
+    the bucket the skip breakdown counts and the detail that breakdown drops."""
+    key, _, detail = (reason or "").partition(":")
+    return {
+        "run": started_at,
+        "id": role.get("id"),
+        "company": role.get("company"),
+        "title": role.get("title"),
+        "url": role.get("url"),
+        "source": role.get("source"),
+        "postedDate": role.get("postedDate"),
+        "reason": key.strip(),
+        "detail": detail.strip() or None,
+    }
+
+
+def write_rejects_log(rejects, keep_days=REJECTS_KEEP_DAYS):
+    """Append every rejected posting to data/logs/rejects-YYYY-MM-DD.jsonl.
+
+    Counters in search-log.json say how many postings each rule rejected; they
+    can't say which ones, so "why didn't role X show up?" had no answer outside
+    the title-rescue queue's slice. Append (not "w") so a
+    second run the same day adds to the day's file instead of replacing it — the
+    history the title-rescue queue deliberately doesn't keep. Best-effort: a log
+    that can't be written must never fail the run that produced it."""
+    if not rejects:
+        return
+    logs = DATA / "logs"
+    path = logs / f"{REJECTS_PREFIX}{TODAY}.jsonl"
+    try:
+        logs.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as f:
+            for r in rejects:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"  rejects-log warning: could not write {path.name}: {e}")
+        return
+    # prune: keep only the newest `keep_days` daily files (names sort by date)
+    for old in sorted(logs.glob(f"{REJECTS_PREFIX}*.jsonl"))[:-keep_days]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    print(f"Rejects log: {len(rejects)} rejected posting(s) -> data/logs/{path.name}")
+
+
 # ------------------------------------------------------------- closed listings
 def mark_closed_listings(roles, live_boards, log=None):
     """RC1-273: a role previously open at a SUCCESSFULLY fetched watchlist company
@@ -1669,6 +1722,7 @@ def run(dry_run=False, max_age_days=1):
     batch_urls, batch_ids = set(), set()
     changed_active, changed_decided, changed_ids, reassessing = [], [], set(), 0
     rescue_pending = []
+    rejects = []
 
     for raw, source in candidates:
         role = normalize(raw, source)
@@ -1708,6 +1762,8 @@ def run(dry_run=False, max_age_days=1):
         # age filter (only when we actually know the posting date)
         if role.get("postedDate") and role["postedDate"] < cutoff:
             skip_breakdown["expired"] = skip_breakdown.get("expired", 0) + 1
+            rejects.append(reject_record(role, f"expired: posted {role['postedDate']} < cutoff {cutoff}",
+                                         log["startedAt"]))
             continue
 
         # filter cascade
@@ -1720,6 +1776,7 @@ def run(dry_run=False, max_age_days=1):
         if not ok:
             key = reason.split(":")[0]
             skip_breakdown[key] = skip_breakdown.get(key, 0) + 1
+            rejects.append(reject_record(role, reason, log["startedAt"]))
             # RC1-277: keep fresh title-rejects for the LLM title-rescue pass —
             # nonstandard phrasings ("PgM III", "Delivery Lead") that the keyword
             # filter can't enumerate. Reviewed via scripts/title_rescue.py.
@@ -1766,6 +1823,8 @@ def run(dry_run=False, max_age_days=1):
     if dry_run:
         print("(dry run: nothing written)")
         return 0
+
+    write_rejects_log(rejects)
 
     if rescue_pending:
         write_rescue_queue(rescue_pending)
