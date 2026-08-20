@@ -27,6 +27,13 @@ class BoardDateTests(unittest.TestCase):
         self.assertIn('id="sortSelect"', html)             # board sort control shipped
         self.assertIn('value="added-desc"', html)
 
+    def test_card_carries_match_as_sort_data(self):
+        """RC1-295: the date sort tiebreaks on match, so the card needs the score
+        as data, not just as text in the .match div."""
+        html = render.render_html(_jobs(), {"jobs": {}})
+        self.assertIn('data-added="2026-08-15" data-score="90"', html)
+        self.assertIn('data-added="" data-score="80"', html)   # legacy role still scores
+
     def test_table_has_sortable_added_column(self):
         html = render.render_table_html(_jobs(), {"jobs": {}})
         self.assertIn('<th data-sort="added"', html)

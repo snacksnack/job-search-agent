@@ -59,8 +59,15 @@ function initFromParams() {
 }
 
 // Board sorting: default is the server-rendered order (priority, then match desc);
-// the select re-orders cards in the DOM by data-added, empties last (like the
-// table's posted column). The original order is captured once for restore.
+// the select re-orders cards by data-added, empties last (like the table's posted
+// column). The original order is captured once for restore.
+//
+// foundDate is day-granularity and a sweep can add ~100 roles at once, so a date
+// sort alone leaves one big same-date block in no defined order. Match percent
+// breaks the tie, descending in BOTH directions — "oldest added" still wants the
+// best match first inside a day. Sorting from initialCardOrder rather than live DOM
+// keeps that deterministic: reading the DOM meant the input was the previous
+// sort's output, so within-date order survived only by stable-sort accident.
 let initialCardOrder = null;
 function applySortSelect() {
   const wrap = document.getElementById("cards");
@@ -71,12 +78,13 @@ function applySortSelect() {
     cards = initialCardOrder;
   } else {
     const dir = v.endsWith("asc") ? 1 : -1;
-    cards = Array.from(wrap.querySelectorAll(".card")).sort((a, b) => {
+    cards = initialCardOrder.slice().sort((a, b) => {
       const va = a.dataset.added || "", vb = b.dataset.added || "";
       if (va === "" && vb !== "") return 1;      // undated cards sink either way
       if (vb === "" && va !== "") return -1;
       const cmp = va < vb ? -1 : (va > vb ? 1 : 0);
-      return dir === 1 ? cmp : -cmp;
+      if (cmp !== 0) return dir === 1 ? cmp : -cmp;
+      return (+b.dataset.score || 0) - (+a.dataset.score || 0);
     });
   }
   cards.forEach(c => wrap.appendChild(c));
