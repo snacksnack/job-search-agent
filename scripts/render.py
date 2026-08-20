@@ -279,7 +279,7 @@ def _card(r, dec):
                          ("offer", "Offer"), ("rejected", "Rejected"), ("hidden", "Hidden")))
 
     return f"""
-    <div class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-priority="{'1' if pri else '0'}" data-prep="{'1' if prep else '0'}" data-closed="{'1' if closed else '0'}" data-added="{esc(added or '')}">
+    <div class="{classes}" data-id="{esc(rid)}" data-status="{esc(status)}" data-search="{esc(blob)}" data-priority="{'1' if pri else '0'}" data-prep="{'1' if prep else '0'}" data-closed="{'1' if closed else '0'}" data-added="{esc(added or '')}" data-score="{r.get('matchPercent', 0)}">
       <div class="card-head">
         <div class="match">{r.get('matchPercent', 0)}</div>
         <div class="title-wrap">
