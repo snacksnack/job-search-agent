@@ -7,7 +7,9 @@ Sonnet-pinned subagent (see skills/daily-job-search/SKILL.md). This script does
 only the deterministic, token-free plumbing around it:
 
   --list-pending   Print the roles that still need an assessment (those with no
-                   `skillMatch` yet), trimmed to just what the subagent needs to
+                   `skillMatch` yet, plus those whose JD changed under an existing
+                   one — RC1-297 flags those `reassessSuggested` rather than
+                   deleting the assessment), trimmed to just what the subagent needs to
                    read (id, company, title, location, description). Keeps the
                    subagent's token use scoped to new JDs, not the whole file.
 
@@ -66,7 +68,9 @@ def list_pending(include_all=False, limit=None, max_desc=DEFAULT_MAX_DESC):
     for r in jobs.get("roles", []):
         if r.get("closed"):             # listing gone from the board; skip assessment
             continue
-        if not include_all and r.get("skillMatch"):
+        # RC1-297: an assessed role whose JD changed under it keeps its assessment
+        # and carries `reassessSuggested` instead — it is pending again, deliberately.
+        if not include_all and r.get("skillMatch") and not r.get("reassessSuggested"):
             continue
         desc = (r.get("fullDescription") or r.get("description") or "")
         if max_desc and len(desc) > max_desc:
@@ -117,6 +121,7 @@ def apply_assessments(path, model="sonnet"):
             "assessedBy": a.get("assessedBy", model),
             "assessedAt": a.get("assessedAt", today),
         }
+        role.pop("reassessSuggested", None)   # RC1-297: the re-assessment just happened
         # The fit now feeds matchPercent, so rescore the role against the fresh assessment.
         pct, is_priority = score(role, profile)
         role["matchPercent"] = pct
@@ -152,7 +157,9 @@ def main():
         jobs = load_jobs()
         roles = jobs.get("roles", [])
         assessed = sum(1 for r in roles if r.get("skillMatch"))
-        print(f"total={len(roles)} assessed={assessed} pending={len(roles) - assessed}")
+        stale = sum(1 for r in roles if r.get("skillMatch") and r.get("reassessSuggested"))
+        print(f"total={len(roles)} assessed={assessed} pending={len(roles) - assessed} "
+              f"reassess={stale}")
         return 0
 
     if args.list_pending:

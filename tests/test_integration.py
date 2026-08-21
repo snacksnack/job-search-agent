@@ -117,13 +117,16 @@ class ReenrichTests(unittest.TestCase):
         pipeline.enrich_from_ats = self._orig_enrich
         self._tmp.cleanup()
 
-    def test_reenrich_updates_desc_and_clears_skillmatch(self):
+    def test_reenrich_updates_desc_and_flags_stale_assessment(self):
         rc = _quiet(pipeline.reenrich,dry_run=False)
         self.assertEqual(rc, 0)
         role = json.loads((pipeline.DATA / "jobs.json").read_text())["roles"][0]
         self.assertGreater(len(role["fullDescription"]), 300)
         self.assertEqual(role["salaryMin"], 180000)
-        self.assertNotIn("skillMatch", role)            # cleared for re-assessment
+        # RC1-297: the fuller JD makes the assessment stale, not wrong -- keep it and
+        # flag it, so the score stays assessed instead of regressing to a heuristic.
+        self.assertEqual(role["skillMatch"]["assessedBy"], "sonnet")
+        self.assertTrue(role["reassessSuggested"])
         self.assertGreater(role["matchPercent"], 0)     # rescored
 
     def test_reenrich_dry_run_writes_nothing(self):

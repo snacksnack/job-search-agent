@@ -870,6 +870,39 @@ def fit_from_skillmatch(role):
     return ratio * conf + NEUTRAL_FIT * (1 - conf)             # toward neutral when low-confidence
 
 
+def is_real_assessment(sm):
+    """RC1-297: did this cached skillMatch come from a human/LLM assessment?
+
+    Every skillMatch on the board is authored by scripts/skill_match.py, which stamps
+    `assessedBy` (older rows recovered from a board render carry `model` instead), or
+    pinned by hand with `assessmentLocked`. Any of those is judgment work that a
+    pipeline run must not throw away; a block with no provenance at all is not an
+    assessment and stays disposable.
+    """
+    if not isinstance(sm, dict):
+        return False
+    return bool(sm.get("assessmentLocked") or sm.get("assessedBy") or sm.get("model"))
+
+
+def flag_stale_assessment(role):
+    """A role's JD changed under it, so its cached assessment no longer describes the
+    posting. Returns "locked", "cleared" or "" (nothing was cached).
+
+    Deleting a real assessment is destructive twice over: the judgment is gone, and
+    the fit it fed into falls back to NEUTRAL_FIT, so the role's matchPercent jumps to
+    an unassessed heuristic until someone notices. Keep it, and mark the role so
+    scripts/skill_match.py offers it for a deliberate re-assessment instead.
+    """
+    sm = role.get("skillMatch")
+    if sm is None:
+        return ""
+    if is_real_assessment(sm):
+        role["reassessSuggested"] = True
+        return "locked"
+    role.pop("skillMatch", None)
+    return "cleared"
+
+
 def score(role, profile):
     cand = profile.get("candidate", {})
     title = (role.get("title") or "").lower()
@@ -1482,8 +1515,8 @@ def enrich_from_ats(url):
 def reenrich(dry_run=False, min_gain=200):
     """Re-fetch full job descriptions for existing roles that have a supported ATS
     URL, replacing thin/snippet descriptions with the canonical ATS text. Recomputes
-    the deterministic score and, when a description materially changes, clears any
-    cached `skillMatch` so the next run re-assesses it on the fuller text.
+    the deterministic score and, when a description materially changes, flags any
+    cached `skillMatch` as stale so the next run re-assesses it on the fuller text.
 
     Only touches roles with an enrichable ATS url (see ENRICHABLE_HOSTS). For
     SmartRecruiters this is the step that fills the full JD the watchlist sweep
@@ -1543,7 +1576,7 @@ def reenrich(dry_run=False, min_gain=200):
         role["matchPercent"] = pct
         role["isPriorityDomain"] = is_priority
         role["rationale"] = make_rationale(role)
-        if role.pop("skillMatch", None) is not None:
+        if flag_stale_assessment(role):
             recleared += 1
         updated += 1
 
@@ -1551,7 +1584,7 @@ def reenrich(dry_run=False, min_gain=200):
           f"{not_found} not found on ATS, {no_ats} have no ATS url, "
           f"{skipped_closed} closed (skipped).")
     if recleared:
-        print(f"  Cleared {recleared} cached skill-match assessment(s) for re-assessment.")
+        print(f"  Flagged {recleared} role(s) for re-assessment on the fuller JD.")
     if dry_run:
         print("(dry run: nothing written)")
         return 0
@@ -1714,7 +1747,7 @@ def resolve_ats(dry_run=False, allow_guess=True, limit=None, min_gain=200):
             bd = best.get("description") or ""
             if len(bd) > len(r.get("fullDescription") or "") + min_gain:
                 r["fullDescription"] = bd
-                if r.pop("skillMatch", None) is not None:
+                if flag_stale_assessment(r):
                     reassessed += 1
             r["atsResolveStatus"] = "resolved"
             pct, is_priority = score(r, profile)
@@ -1725,8 +1758,8 @@ def resolve_ats(dry_run=False, allow_guess=True, limit=None, min_gain=200):
     print(f"ATS-resolve: {resolved} roles linked, {unresolved} unresolved "
           f"across {companies} companies.")
     if reassessed:
-        print(f"  {reassessed} role(s) had a fuller JD pulled in; their skillMatch was cleared "
-              f"for re-assessment.")
+        print(f"  {reassessed} role(s) had a fuller JD pulled in and are flagged for "
+              f"re-assessment on the fuller text.")
     if dry_run:
         print("(dry run: nothing written)")
         return 0
@@ -1817,16 +1850,17 @@ def run(dry_run=False, max_age_days=1):
                 by_url[merged_url] = ex
         if ex is not None:
             # Re-seen posting (RC1-278): unchanged -> skip as before; changed ->
-            # update the stored role. For undecided roles a changed JD clears the
-            # cached skillMatch (re-assess) and rescores; decided roles get the
-            # data update + changedDate only, so they are never resurfaced.
+            # update the stored role. For undecided roles a changed JD marks the
+            # cached skillMatch stale (RC1-297: a real assessment is kept and
+            # flagged, never deleted) and rescores; decided roles get the data
+            # update + changedDate only, so they are never resurfaced.
             changed, desc_changed = apply_content_change(ex, role)
             if changed and ex.get("id") not in changed_ids:
                 changed_ids.add(ex.get("id"))
                 if ex.get("id") in decided:
                     changed_decided.append(ex)
                 else:
-                    if desc_changed and ex.pop("skillMatch", None) is not None:
+                    if desc_changed and flag_stale_assessment(ex):
                         reassessing += 1
                     pct, is_priority = score(ex, profile)
                     ex["matchPercent"], ex["isPriorityDomain"] = pct, is_priority

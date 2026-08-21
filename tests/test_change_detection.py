@@ -60,13 +60,14 @@ class ChangeDetectionTests(unittest.TestCase):
         log = json.loads((pipeline.DATA / "search-log.json").read_text())["runs"][-1]
         return roles, log, buf.getvalue()
 
-    def test_changed_jd_updates_clears_skillmatch_and_rescores(self):
+    def test_changed_jd_updates_flags_assessment_and_rescores(self):
         self._setup([_stored(3, "Senior Technical Program Manager", OLD_DESC)],
                     [_gh_job(3, "Senior Technical Program Manager", NEW_DESC)])
         roles, log, out = self._run()
         r = roles["acme-3"]
         self.assertIn("Salary transparency added.", r["fullDescription"])
-        self.assertNotIn("skillMatch", r)                      # cleared for re-assessment
+        self.assertEqual(r["skillMatch"]["assessedBy"], "sonnet")  # RC1-297: kept, not wiped
+        self.assertTrue(r["reassessSuggested"])
         self.assertEqual(r["changedDate"], pipeline.TODAY)
         self.assertEqual(r["contentHash"], pipeline.role_content_hash(r))
         self.assertEqual(log["changedRoles"]["active"],
