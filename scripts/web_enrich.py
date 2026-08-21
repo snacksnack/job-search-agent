@@ -19,8 +19,9 @@ browsing itself:
                    atomically. FILE is JSON: a list (or {id: {...}} map) of
                    {id, fullDescription, [salaryMin], [salaryMax], [location],
                    [postedDate]}. Rescoring uses pipeline.score; when a description
-                   materially grows, the cached skillMatch is cleared so the next
-                   Cowork run re-assesses it on the full text.
+                   materially grows, the cached skillMatch is flagged stale (RC1-297:
+                   a real assessment is kept, never deleted) so the next Cowork run
+                   re-assesses it on the full text.
 
 Stdlib only. Python 3.11+.
 """
@@ -34,7 +35,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pipeline import score, make_rationale  # reuse the deterministic scorer
+from pipeline import score, make_rationale, flag_stale_assessment  # reuse the deterministic scorer
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -153,7 +154,7 @@ def apply_enrichments(path):
         role["matchPercent"] = pct
         role["isPriorityDomain"] = is_priority
         role["rationale"] = make_rationale(role)
-        if role.pop("skillMatch", None) is not None:
+        if flag_stale_assessment(role):
             recleared += 1
         updated += 1
 
@@ -189,7 +190,7 @@ def main():
         updated, recleared, skipped, unknown = apply_enrichments(args.apply)
         print(f"Applied {updated} enrichment(s); skipped {skipped} (no material gain).")
         if recleared:
-            print(f"  Cleared {recleared} cached skill-match assessment(s) for re-assessment.")
+            print(f"  Flagged {recleared} role(s) for re-assessment on the fuller JD.")
         if unknown:
             print(f"  {len(unknown)} unknown id(s): {', '.join(unknown[:8])}"
                   + (" …" if len(unknown) > 8 else ""), file=sys.stderr)

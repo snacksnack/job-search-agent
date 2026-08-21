@@ -84,7 +84,7 @@ class WebEnrichIoTests(unittest.TestCase):
         rows = web_enrich.list_pending()
         self.assertEqual({r["id"] for r in rows}, {"a"})
 
-    def test_apply_updates_and_clears_skillmatch(self):
+    def test_apply_updates_and_flags_stale_assessment(self):
         long_desc = "Senior Solutions Architect. Requirements: Python, AWS, Kubernetes. " * 10
         f = Path(self._tmp.name) / "enr.json"
         f.write_text(json.dumps([{"id": "a", "fullDescription": long_desc,
@@ -95,7 +95,8 @@ class WebEnrichIoTests(unittest.TestCase):
         role = next(r for r in json.loads((web_enrich.JOBS_PATH).read_text())["roles"] if r["id"] == "a")
         self.assertGreater(len(role["fullDescription"]), 300)
         self.assertEqual(role["enrichedVia"], "web")
-        self.assertNotIn("skillMatch", role)
+        self.assertEqual(role["skillMatch"]["assessedBy"], "sonnet")   # RC1-297: kept
+        self.assertTrue(role["reassessSuggested"])
 
     def test_apply_idempotent_skips_no_gain(self):
         f = Path(self._tmp.name) / "enr.json"
