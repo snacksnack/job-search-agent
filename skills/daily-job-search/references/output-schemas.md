@@ -53,7 +53,7 @@ Field definitions:
 - `isPriorityDomain`: true when the role falls in one of the profile's `priorityDomains`.
 - `source`: the `source` value from the matching entry in `data/search.json`.
 
-**Deduplication**: Before adding a role, check if a role with the same URL already exists. If so, skip it entirely (but update `appearedInSources` if found via a new search).
+**Deduplication**: Before adding a role, check whether it is already on the board — by posting URL, by role `id`, and by normalized company+title. The third key matters because a role's `id` and `url` depend on where it was found: a LinkedIn/hiring.cafe save carries an `li-`/`hc-` id and the listing URL, while the same posting discovered on the company's ATS carries the canonical `slugify(company, title)` id and the apply URL. A company+title hit merges into the stored row (apply link, posted date and source folded in, `appearedInSources` appended) rather than adding a second one — unless the locations differ, which means a sibling posting in another metro and is skipped, never collapsed into the stored row.
 
 **Write process**: Use Python via Bash to safely read, merge, and write `data/jobs.json`. Include schema-migration logic from v1 to v2 if an older file is encountered.
 
@@ -147,7 +147,7 @@ Aggregator discovery feeds (`searches[]` entries with `method: "api"` — Remoti
 
 ### Change detection (re-seen postings)
 
-Every role carries `contentHash` — `sha256(title|location|description)[:16]`, refreshed at each pipeline write. When the sweep re-sees a posting that's already stored (matched by id or url), it classifies it: **unchanged** → skipped as before; **changed** (JD rewritten, location moved, salary added) → the stored role is updated in place and stamped `changedDate`. For roles the user hasn't decided on, a changed JD also clears the cached `skillMatch` (so it re-assesses on the new text) and rescores; roles already decided in `state.json` get the data update only and are never resurfaced. Guards: an empty incoming description (list-only SmartRecruiters/Gem rows) or one under half the stored length never counts as a JD change, and whitespace differences are ignored. The run entry records `changedRoles`: `{"active": ["Company — Title", ...], "decided": [...], "reassessing": N}` — mention changed roles in the briefing's run stats, and call out `decided` entries (a JD that changed after you applied is worth knowing).
+Every role carries `contentHash` — `sha256(title|location|description)[:16]`, refreshed at each pipeline write. When the sweep re-sees a posting that's already stored (matched by id, url, or company+title), it classifies it: **unchanged** → skipped as before; **changed** (JD rewritten, location moved, salary added) → the stored role is updated in place and stamped `changedDate`. For roles the user hasn't decided on, a changed JD also clears the cached `skillMatch` (so it re-assesses on the new text) and rescores; roles already decided in `state.json` get the data update only and are never resurfaced. Guards: an empty incoming description (list-only SmartRecruiters/Gem rows) or one under half the stored length never counts as a JD change, and whitespace differences are ignored. The run entry records `changedRoles`: `{"active": ["Company — Title", ...], "decided": [...], "reassessing": N}` — mention changed roles in the briefing's run stats, and call out `decided` entries (a JD that changed after you applied is worth knowing).
 
 ### Manual-check reminders (unfetchable boards)
 

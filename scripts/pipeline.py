@@ -1362,6 +1362,51 @@ def apply_content_change(ex, inc):
     return True, desc_changed
 
 
+def same_posting_location(a, b):
+    """RC1-296: do two location strings plausibly describe the same posting site?
+
+    Only used to guard the company+title dedup below. Sources word the same place
+    differently ("New York, NY" vs "New York"), so compare token sets by subset
+    rather than by equality, and treat an unknown location on either side as
+    compatible -- a missing location is no evidence of a different posting.
+    """
+    def toks(v):
+        return set(re.sub(r"[^a-z0-9]+", " ", (v or "").lower()).split())
+    ta, tb = toks(a), toks(b)
+    if not ta or not tb:
+        return True
+    return ta <= tb or tb <= ta
+
+
+def merge_discovery(ex, inc, source):
+    """RC1-296: fold a posting re-discovered from another source into the stored role.
+
+    Keeps the richer identity rather than the newer one: an ATS apply link beats a
+    listing url (and a stored ATS url is never downgraded to one), the listing url is
+    kept as the source url, and the source is recorded so the board shows the posting
+    was seen in both places. Content (JD/title/salary) is left to apply_content_change.
+    Returns True if anything was filled in.
+    """
+    changed = False
+    if inc.get("atsUrl") and not ex.get("atsUrl"):
+        ex["atsUrl"] = inc["atsUrl"]
+        ex["url"] = inc["atsUrl"]
+        changed = True
+    if inc.get("sourceUrl") and not ex.get("sourceUrl"):
+        ex["sourceUrl"] = inc["sourceUrl"]
+        changed = True
+    if inc.get("postedDate") and not ex.get("postedDate"):
+        ex["postedDate"] = inc["postedDate"]
+        changed = True
+    seen = ex.get("appearedInSources")
+    if not seen:
+        seen = ex["appearedInSources"] = [ex["source"]] if ex.get("source") else []
+    if source and source not in seen:
+        seen.append(source)
+        changed = True
+    return changed
+
+
 def enrich_from_ats(url):
     """Given an ATS posting URL, fetch the canonical record from the board API."""
     h = host_of(url)
@@ -1706,6 +1751,18 @@ def run(dry_run=False, max_age_days=1):
     existing = jobs.get("roles", [])
     by_id = {r.get("id"): r for r in existing}
     by_url = {(r.get("url") or "").rstrip("/"): r for r in existing if (r.get("url") or "").strip()}
+    # RC1-296: identity index on company+title. A stored role's id and url both
+    # depend on where it was found -- a LinkedIn/hiring.cafe save carries an `li-`/
+    # `hc-` id and the listing url, while the ATS sweep carries the canonical slug
+    # and the apply url -- so id- and url-dedup both miss when the same posting is
+    # re-discovered from a different source, and it gets appended a second time.
+    # Key it with slugify(), the same normalization that generates ids, so the two
+    # indexes can never disagree about what counts as the same company+title.
+    by_ct = {}
+    for r in existing:
+        ck = slugify(r.get("company") or "", r.get("title") or "")
+        if ck:
+            by_ct.setdefault(ck, r)
     decided = set(state.get("jobs", {}).keys())
 
     log = {"date": TODAY, "startedAt": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -1719,8 +1776,9 @@ def run(dry_run=False, max_age_days=1):
     manual_check_reminders(search, log, dry_run=dry_run)
     reviewed = len(candidates)
     new_roles = []
-    batch_urls, batch_ids = set(), set()
+    batch_urls, batch_ids, batch_cts = set(), set(), set()
     changed_active, changed_decided, changed_ids, reassessing = [], [], set(), 0
+    merged_cross_source, merged_ids = [], set()
     rescue_pending = []
     rejects = []
 
@@ -1729,6 +1787,7 @@ def run(dry_run=False, max_age_days=1):
 
         # dedup (existing + within-batch + already decided)
         ukey = (role["url"] or "").rstrip("/")
+        ckey = slugify(role["company"], role["title"])
         ex = (by_url.get(ukey) if ukey else None) or by_id.get(role["id"])
         if ex is not None:
             # Same slug id but a different posting url = a sibling listing (same
@@ -1737,6 +1796,26 @@ def run(dry_run=False, max_age_days=1):
             ex_url = (ex.get("url") or "").rstrip("/")
             if ukey and ex_url and ukey != ex_url:
                 continue
+        elif ckey and by_ct.get(ckey) is not None:
+            # RC1-296: neither index matched, but this company+title is already on
+            # the board under another source's id/url -- the same job, found again
+            # somewhere else. Merge the apply link and source into the stored row and
+            # let the change-detection path below fold in the JD, instead of
+            # appending a duplicate. A different location means a genuine sibling
+            # posting in another metro rather than this one, so skip it the way the
+            # id-collision case above does -- never collapse two metros into one row.
+            ex = by_ct[ckey]
+            if not same_posting_location(ex.get("location"), role.get("location")):
+                continue
+            if merge_discovery(ex, role, source) and ex.get("id") not in merged_ids:
+                merged_ids.add(ex.get("id"))
+                merged_cross_source.append(ex)
+            # The stored row now answers to this posting's url too, so a later
+            # candidate for the same job this run resolves straight to it.
+            merged_url = (ex.get("url") or "").rstrip("/")
+            if merged_url:
+                by_url[merged_url] = ex
+        if ex is not None:
             # Re-seen posting (RC1-278): unchanged -> skip as before; changed ->
             # update the stored role. For undecided roles a changed JD clears the
             # cached skillMatch (re-assess) and rescores; decided roles get the
@@ -1757,6 +1836,10 @@ def run(dry_run=False, max_age_days=1):
         if role["id"] in batch_ids or role["id"] in decided:
             continue
         if ukey and ukey in batch_urls:
+            continue
+        # RC1-296: the same job reached this run from two feeds at once (an inbox
+        # save and the ATS sweep) -- different ids, different urls, one posting.
+        if ckey and ckey in batch_cts:
             continue
 
         # age filter (only when we actually know the posting date)
@@ -1797,8 +1880,16 @@ def run(dry_run=False, max_age_days=1):
         batch_ids.add(role["id"])
         if ukey:
             batch_urls.add(ukey)
+        if ckey:
+            batch_cts.add(ckey)
 
     log["counts"] = {"reviewed": reviewed, "qualified": len(new_roles), "skipped": skip_breakdown}
+    if merged_cross_source:
+        log["counts"]["mergedCrossSource"] = len(merged_cross_source)
+        print(f"Cross-source dedup: {len(merged_cross_source)} posting(s) already on the "
+              f"board under another source's id/url — merged, not duplicated.")
+        for r in merged_cross_source:
+            print(f"  merged            {r.get('company')} — {r.get('title')}")
     if changed_active or changed_decided:
         log["changedRoles"] = {
             "active": [f"{r.get('company')} — {r.get('title')}" for r in changed_active],
