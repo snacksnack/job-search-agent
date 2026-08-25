@@ -49,6 +49,8 @@ Execute the workflow autonomously. The user has authorized: running `scripts/pip
 
 ## Run order
 
+> **Standing rule — today's date comes from the system clock, never from your context.** Before any step that writes or reasons about a date, run `date +%F` via Bash and use that value. Do NOT use the "Today's date" header in your environment/session context: it is stamped when the session starts and goes stale in a session that spans days, which is exactly how roles added on the 22nd and 23rd all got dated the 21st (RC1-311). This governs inbox filenames, anything you say about "today" in the briefing, and any date you write into a file. The same rule is why you never hand-write roles into `jobs.json` — drop raw finds in `data/inbox/` and let `scripts/pipeline.py` stamp `foundDate` from the clock. The pipeline ignores any `foundDate` an inbox file supplies and reports it under `Date check:` in its stdout.
+
 1. **Read** `profile.json`, `search.json`, `state.json`, `jobs.json` (first-run guard above).
 2. **LinkedIn discovery (Claude in Chrome).** For each enabled `linkedin`/discovery search in `search.json`, browse and capture raw postings, then write them to `data/inbox/linkedin-<date>.json` (schema in `references/output-schemas.md` → "Inbox finds"). Do not score or filter in the chat — that is the pipeline's job. See `references/search-execution.md`.
 
