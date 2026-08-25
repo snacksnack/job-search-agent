@@ -968,6 +968,11 @@ def normalize(raw, source):
     # honor explicit fields if the inbox provided them
     source_url = raw.get("sourceUrl", source_url)
     ats_url = raw.get("atsUrl", ats_url)
+    # ...but NOT foundDate (RC1-311). It is stamped from TODAY below, never from
+    # the incoming payload: an inbox file written by the assistant carries
+    # whatever date that session believed it was, and a stale session header
+    # back-dates every role in the drop. The board's "found on" grouping is only
+    # trustworthy if this one value always comes off the system clock.
     out = {
         "id": raw.get("id") or slugify(company, title),
         "company": company,
@@ -1314,6 +1319,67 @@ def write_rejects_log(rejects, keep_days=REJECTS_KEEP_DAYS):
         except OSError:
             pass
     print(f"Rejects log: {len(rejects)} rejected posting(s) -> data/logs/{path.name}")
+
+
+# ------------------------------------------------------------- date integrity
+def found_date_warnings(new_roles, all_roles, ignored_found_dates=(), today=None):
+    """RC1-311: tripwires for a `foundDate` that didn't come off the system clock.
+
+    normalize() stamps every role with TODAY, so nothing that goes through this
+    pipeline can be mis-dated. The failure this guards is a role that reached
+    jobs.json by another path — hand-written by the assistant from a stale
+    session date header — which silently misattributes it to the wrong day in the
+    board's date grouping and in the dated text export. Three signals, all cheap:
+
+      - a newly added role not stamped today (a normalize() regression);
+      - any stored role dated ahead of the clock, or carrying an unparseable
+        date (a bad hand-edit, visible on the next run whenever it happened);
+      - an inbox payload that tried to supply its own foundDate (ignored on the
+        way in, but worth naming so the source of the drift gets fixed).
+
+    Returns a list of human-readable warning lines; reporting is the caller's job.
+    """
+    today = today or TODAY
+    out = []
+    for r in new_roles:
+        fd = r.get("foundDate")
+        if fd != today:
+            out.append(f"new role stamped foundDate={fd!r}, clock says {today}: "
+                       f"{r.get('company')} — {r.get('title')}")
+    for r in all_roles:
+        fd = r.get("foundDate")
+        if not fd:
+            continue
+        try:
+            parsed = datetime.date.fromisoformat(fd)
+        except (TypeError, ValueError):
+            out.append(f"unparseable foundDate={fd!r}: "
+                       f"{r.get('company')} — {r.get('title')}")
+            continue
+        if parsed.isoformat() > today:
+            out.append(f"foundDate {fd} is ahead of the system clock ({today}): "
+                       f"{r.get('company')} — {r.get('title')}")
+    for company, title, fd in ignored_found_dates:
+        out.append(f"ignored inbox-supplied foundDate={fd!r} (stamped {today}): "
+                   f"{company} — {title}")
+    return out
+
+
+DATE_WARNINGS_SHOWN = 10   # a back-dated inbox drop warns once per posting; stdout stays readable
+
+
+def report_found_dates(new_roles, all_roles, ignored_found_dates=()):
+    warnings = found_date_warnings(new_roles, all_roles, ignored_found_dates)
+    if not warnings:
+        return warnings
+    print(f"Date check: {len(warnings)} foundDate warning(s) — "
+          f"the board's date grouping keys off this field.")
+    for w in warnings[:DATE_WARNINGS_SHOWN]:
+        print(f"  foundDate  {w}")
+    if len(warnings) > DATE_WARNINGS_SHOWN:
+        print(f"  foundDate  ... and {len(warnings) - DATE_WARNINGS_SHOWN} more "
+              f"(full list in search-log.json under foundDateWarnings)")
+    return warnings
 
 
 # ------------------------------------------------------------- closed listings
@@ -1814,9 +1880,14 @@ def run(dry_run=False, max_age_days=1):
     merged_cross_source, merged_ids = [], set()
     rescue_pending = []
     rejects = []
+    ignored_found_dates = []
 
     for raw, source in candidates:
         role = normalize(raw, source)
+        if raw.get("foundDate") and raw["foundDate"] != TODAY:
+            # RC1-311: normalize() dropped it in favor of the clock. Name it so a
+            # drop that keeps back-dating gets traced to whatever wrote the inbox.
+            ignored_found_dates.append((role["company"], role["title"], raw["foundDate"]))
 
         # dedup (existing + within-batch + already decided)
         ukey = (role["url"] or "").rstrip("/")
@@ -1945,6 +2016,8 @@ def run(dry_run=False, max_age_days=1):
     for r in top:
         print(f"  {r['matchPercent']:>3}  {r['company']} — {r['title']}")
 
+    date_warnings = report_found_dates(new_roles, existing + new_roles, ignored_found_dates)
+
     if dry_run:
         print("(dry run: nothing written)")
         return 0
@@ -1961,6 +2034,8 @@ def run(dry_run=False, max_age_days=1):
         r["contentHash"] = role_content_hash(r)
 
     jobs["roles"] = existing + new_roles
+    if date_warnings:
+        log["foundDateWarnings"] = date_warnings
     jobs.setdefault("meta", {})["lastRun"] = TODAY
     jobs["meta"]["totalRoles"] = len(jobs["roles"])
     with open(DATA / "jobs.json", "w") as f:

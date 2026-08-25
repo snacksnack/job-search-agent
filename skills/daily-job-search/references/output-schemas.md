@@ -193,7 +193,9 @@ The LinkedIn discovery step (Claude in Chrome) does not score or filter. It only
 ]
 ```
 
-The pipeline classifies the `url` into `sourceUrl` vs `atsUrl` by domain, and when a posting's URL is on Greenhouse/Lever/Ashby it fetches the canonical record (full JD, salary, apply URL) from that board's API automatically. So if you only have a LinkedIn URL, just record it — enrichment happens downstream. Inbox files are transient and git-ignored; the pipeline reads every `*.json` in the folder.
+The pipeline classifies the `url` into `sourceUrl` vs `atsUrl` by domain, and when a posting's URL is on Greenhouse/Lever/Ashby it fetches the canonical record (full JD, salary, apply URL) from that board's API automatically. So if you only have a LinkedIn URL, just record it — enrichment happens downstream. Inbox files are transient and git-ignored; the pipeline reads every `*.json` in the folder, so the `<date>` in the filename is for your convenience only — get it from `date +%F`, never from the session's date header (RC1-311).
+
+**Never supply `foundDate` here** (or hand-write a role into `jobs.json`). `foundDate` is stamped by the pipeline from the system clock at ingest, and an inbox-supplied one is dropped and reported under `Date check:` in the run's stdout. This is the one field a stale session date can silently corrupt board-wide: the board's date grouping, the dated text export, and freshness/age logic all key off it.
 
 ## Roles written by the pipeline — data/jobs.json
 
