@@ -76,8 +76,9 @@ tests/     stdlib unittest, 20 files, offline (ATS calls mocked)
   the NYC-metro + US-remote location logic, scoring and penalties, dedup, the
   full `run()` and `--reenrich` paths, and the `skill_match` / `web_enrich` I/O
   round-trips. A change to any of those should move a test.
-- There is **no CI in this repo** — no `.github/workflows`. The suite is only
-  as useful as the habit of running it before opening a PR.
+- **CI runs the suite on every push and PR** (`.github/workflows/ci.yml`,
+  RC1-403) on Python 3.14, with no install step — the workflow must stay
+  dependency-free for the same reason the repo is.
 
 ## Commands
 

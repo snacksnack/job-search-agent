@@ -1,0 +1,31 @@
+name: CI
+
+# RC1-403. The suite is stdlib-only and offline — ATS calls are mocked and the
+# fixtures write their own profile into a temp dir — so it needs no
+# credentials, no services and no install step, and gates on every push.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      # Deliberately no `pip install`. requirements.txt carries no third-party
+      # packages by design (see the file's own comment), and the pipeline and
+      # board server use only urllib/http.server/json. A dependency here would
+      # quietly undo that constraint, so adding one is its own decision.
+      - name: Test (unittest)
+        run: python -m unittest discover -s tests -v
