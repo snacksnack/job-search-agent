@@ -48,10 +48,14 @@ jobs:
           python-version: "3.14"
 
       - name: Install the test reporter
-        run: pip install "pytest>=8" "ddtrace>=4.14,<5"
+        run: pip install "pytest>=8" "pytest-cov>=6.0" "ddtrace>=4.14,<5"
 
       # Not a test credential: a missing key logs an error and runs the
       # suite untouched.
+      # RC1-468: --cov adds line coverage (source = scripts/, .coveragerc);
+      # ddtrace reports it as test.code_coverage.lines_pct. Signal, not a
+      # gate — no threshold. --cov stays last: it takes an optional value,
+      # so a following positional arg would become the coverage source.
       - name: Test (pytest, reported)
         env:
           DD_API_KEY: ${{ secrets.DD_API_KEY }}
@@ -59,4 +63,4 @@ jobs:
           DD_SITE: datadoghq.com
           DD_SERVICE: job-search-agent
           DD_ENV: ci
-        run: pytest --ddtrace tests/ -v
+        run: pytest --ddtrace tests/ -v --cov

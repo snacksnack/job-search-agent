@@ -57,3 +57,8 @@ data/interview-prep/*
 
 # Tracked: the code, the skills, and the generic templates
 #   data/profile.example.json, data/search.example.json
+
+# Test coverage (RC1-468)
+.coverage
+.coverage.*
+htmlcov/
