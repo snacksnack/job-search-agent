@@ -25,7 +25,38 @@ jobs:
 
       # Deliberately no `pip install`. requirements.txt carries no third-party
       # packages by design (see the file's own comment), and the pipeline and
-      # board server use only urllib/http.server/json. A dependency here would
-      # quietly undo that constraint, so adding one is its own decision.
+      # board server use only urllib/http.server/json. This zero-install run
+      # IS the proof of that constraint — a third-party import fails right
+      # here. The reporting job below installs tools into its own job, never
+      # this one.
       - name: Test (unittest)
         run: python -m unittest discover -s tests -v
+
+  # RC1-467 (decision on RC1-452). Reports test-level results to Test
+  # Optimization. A separate job so the stdlib-only proof above stays
+  # zero-install; pytest collects the same unittest suite (verified: 184
+  # tests under both runners). pytest and ddtrace exist only inside this
+  # job and never touch requirements.txt or the product.
+  report-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install the test reporter
+        run: pip install "pytest>=8" "ddtrace>=4.14,<5"
+
+      # Not a test credential: a missing key logs an error and runs the
+      # suite untouched.
+      - name: Test (pytest, reported)
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_CIVISIBILITY_AGENTLESS_ENABLED: "true"
+          DD_SITE: datadoghq.com
+          DD_SERVICE: job-search-agent
+          DD_ENV: ci
+        run: pytest --ddtrace tests/ -v
