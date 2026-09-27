@@ -1,0 +1,6 @@
+# RC1-468: coverage measures the product — the pipeline/server modules in
+# scripts/ that the tests import as top-level names (tests/_fixtures.py puts
+# scripts/ on sys.path). Only the report-tests CI job reads this; the
+# zero-install unittest job stays exactly as it is.
+[run]
+source = scripts
