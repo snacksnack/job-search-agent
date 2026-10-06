@@ -1881,6 +1881,9 @@ def run(dry_run=False, max_age_days=1):
     rescue_pending = []
     rejects = []
     ignored_found_dates = []
+    # RC1-501: inbox sources whose finds are already human-vetted (the user's own
+    # LinkedIn saves). Dedup and decisions still apply; the filter cascade does not.
+    trusted_sources = set((profile.get("matching") or {}).get("trustedSources", []))
 
     for raw, source in candidates:
         role = normalize(raw, source)
@@ -1947,19 +1950,28 @@ def run(dry_run=False, max_age_days=1):
         if ckey and ckey in batch_cts:
             continue
 
+        # RC1-501: a trusted-source find skips the age filter and the cascade --
+        # saving it was the user's decision, and the board badges it as theirs.
+        trusted = role.get("source") in trusted_sources
+        if trusted:
+            role["userSaved"] = True
+
         # age filter (only when we actually know the posting date)
-        if role.get("postedDate") and role["postedDate"] < cutoff:
+        if not trusted and role.get("postedDate") and role["postedDate"] < cutoff:
             skip_breakdown["expired"] = skip_breakdown.get("expired", 0) + 1
             rejects.append(reject_record(role, f"expired: posted {role['postedDate']} < cutoff {cutoff}",
                                          log["startedAt"]))
             continue
 
         # filter cascade
-        ok, reason = title_decision(role["title"], profile)
-        if ok and not employer_ok(role["company"], profile):
+        if trusted:
+            ok, reason = True, ""
+        else:
+            ok, reason = title_decision(role["title"], profile)
+        if ok and not trusted and not employer_ok(role["company"], profile):
             ok, reason = False, "skipEmployer"
         for check in (salary_ok, location_ok, description_ok):
-            if ok:
+            if ok and not trusted:
                 ok, reason = check(role, profile)
         if not ok:
             key = reason.split(":")[0]
