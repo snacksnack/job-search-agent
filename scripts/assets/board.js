@@ -127,7 +127,7 @@ function applyFilters() {
     else if (view === "hidden") inView = isHidden;
     else if (view === "closed") inView = isClosed;
     else inView = !isApplied && !isHidden && !isClosed;  // active: actionable roles only
-    let visible = inView && (!q || c.dataset.search.includes(q));
+    let visible = inView && matchesSearch(c.dataset.search, q);
     if (prepFilter === "has" && c.dataset.prep !== "1") visible = false;
     if (prepFilter === "none" && c.dataset.prep === "1") visible = false;
     c.style.display = visible ? "" : "none";
