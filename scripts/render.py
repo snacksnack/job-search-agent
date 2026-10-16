@@ -334,7 +334,7 @@ def render_html(jobs, state, run_date=None):
     page = _read_asset("board.html")
     replacements = {
         "{{CSS}}": _read_asset("board.css"),
-        "{{JS}}": _read_asset("board.js"),
+        "{{JS}}": _read_asset("search.js") + "\n" + _read_asset("board.js"),
         "{{CARDS}}": cards,
         "{{RUN_DATE}}": esc(run_date),
         "{{TOTAL}}": str(total),
@@ -446,7 +446,7 @@ def render_table_html(jobs, state, run_date=None):
     page = _read_asset("table.html")
     replacements = {
         "{{CSS}}": _read_asset("board.css"),
-        "{{JS}}": _read_asset("table.js"),
+        "{{JS}}": _read_asset("search.js") + "\n" + _read_asset("table.js"),
         "{{ROWS}}": rows,
         "{{RUN_DATE}}": esc(run_date),
         "{{TOTAL}}": str(total),
