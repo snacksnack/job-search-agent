@@ -870,8 +870,16 @@ def fit_from_skillmatch(role):
         return NEUTRAL_FIT
     ratio = 100.0 * (matched + 0.5) / (matched + gaps + 1)      # smoothed: 2/0 -> ~83, not 100
     evidence_conf = min(1.0, (matched + gaps) / 6.0)            # more signals -> more confidence
-    jd = role.get("fullDescription") or role.get("description") or ""
-    jd_conf = 1.0 if len(jd) >= 600 else max(0.3, len(jd) / 600.0)  # thin JD -> low confidence
+    # RC1-525: the JD-length penalty is a proxy for "can this thin JD support a confident
+    # auto-fit?" -- it only makes sense before a role is assessed. Once a real human/LLM
+    # assessment exists, it IS the evidence, and evidence_conf already guards low-signal
+    # ones; penalizing it for a short/unpersisted JD (common for LinkedIn saves, whose JD
+    # text often isn't stored back on the role) just blends a genuine fit back to neutral.
+    if is_real_assessment(sm):
+        jd_conf = 1.0
+    else:
+        jd = role.get("fullDescription") or role.get("description") or ""
+        jd_conf = 1.0 if len(jd) >= 600 else max(0.3, len(jd) / 600.0)  # thin JD -> low confidence
     conf = evidence_conf * jd_conf
     return ratio * conf + NEUTRAL_FIT * (1 - conf)             # toward neutral when low-confidence
 

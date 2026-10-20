@@ -108,6 +108,27 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(good, poor)
         self.assertGreater(good - poor, 15)  # fit is a meaningful share of the score
 
+    def test_real_assessment_ignores_jd_length(self):
+        # RC1-525: a role carrying a real assessment (provenance-stamped) scores the same
+        # whether or not its JD text is stored -- the JD-length penalty is only for
+        # unassessed roles. LinkedIn saves are assessed in-browser but their JD often
+        # isn't persisted, so an empty stored JD must not discount a genuine fit.
+        sm = {"matched": ["a", "b", "c", "d", "e", "f", "g", "h"], "gaps": ["x"],
+              "assessedBy": "sonnet"}
+        no_jd = self._score("Solutions Engineer", desc="", skill_match=sm)[0]
+        long_jd = self._score("Solutions Engineer", desc="x" * 800, skill_match=sm)[0]
+        self.assertEqual(no_jd, long_jd)
+        # and that full-confidence fit lifts it well clear of the neutral baseline
+        self.assertGreater(no_jd, self._score("Solutions Engineer")[0])
+
+    def test_unassessed_thin_jd_still_discounted(self):
+        # The JD-length penalty still applies to a block with no assessment provenance
+        # (not a real assessment): a bare matched/gaps map without assessedBy/model.
+        sm = {"matched": ["a", "b", "c", "d", "e", "f"], "gaps": []}  # no provenance
+        thin = self._score("Solutions Engineer", desc="", skill_match=sm)[0]
+        full = self._score("Solutions Engineer", desc="x" * 800, skill_match=sm)[0]
+        self.assertLess(thin, full)
+
     def test_zero_matched_role_drops_below_neutral(self):
         # A title-strong role with an all-gaps assessment must rank below the same
         # role left unassessed (neutral baseline) -- this is the Amplitude bug fix.
