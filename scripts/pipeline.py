@@ -837,7 +837,14 @@ def detect_domain_bonus(text):
 # 2026-06-11: rebalanced title->fit (0.55/0.35 -> 0.45/0.45) alongside the evidence-aware
 # fit calibration below, so a confident skill-match drives ranking more than the title floor.
 W_TITLE, W_FIT, W_DOMAIN = 0.45, 0.45, 0.10
-NEUTRAL_FIT = 70  # fit baseline used until a role has been skill-matched (or when low-confidence)
+# Fit baseline used until a role has been skill-matched (or when low-confidence).
+# 2026-10-20 (RC1-524): lowered 70 -> 50, the honest midpoint of the 0-100 fit scale.
+# At 70, an unassessed role scored close to a genuinely good fit, so title tier alone
+# decided the ranking: on the live board the unassessed median (79) outranked the
+# assessed median (77), and the score>60 default-view floor pruned almost nothing.
+# 50 keeps "fit unknown" truly neutral (neither rewarded nor penalized), so a confident
+# skill-match now sorts above the baseline and the floor begins to prune the long tail.
+NEUTRAL_FIT = 50
 
 
 def fit_from_skillmatch(role):
