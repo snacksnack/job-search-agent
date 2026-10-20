@@ -76,12 +76,13 @@ class ScoringTests(unittest.TestCase):
             role["skillMatch"] = skill_match
         return pipeline.score(role, self.p)
 
-    # Unassessed roles (no skillMatch) use the neutral fit baseline (70).
+    # Unassessed roles (no skillMatch) use the neutral fit baseline (50).
     def test_program_manager_tier(self):
-        # Weights rebalanced 2026-06-11 (title 0.55->0.45, fit 0.35->0.45): an unassessed
-        # target-title role floors lower so a confident skill-match drives ranking more.
-        self.assertEqual(self._score("Technical Program Manager")[0], 78)
-        self.assertEqual(self._score("Senior Technical Program Manager")[0], 80)
+        # Weights rebalanced 2026-06-11 (title 0.55->0.45, fit 0.35->0.45) and the neutral
+        # baseline lowered 70->50 (RC1-524), so an unassessed target-title role floors lower
+        # still and a confident skill-match drives ranking above the unknown-fit baseline.
+        self.assertEqual(self._score("Technical Program Manager")[0], 69)
+        self.assertEqual(self._score("Senior Technical Program Manager")[0], 71)
 
     def test_project_manager_ranks_below_program_manager(self):
         prog = self._score("Technical Program Manager")[0]
@@ -91,7 +92,10 @@ class ScoringTests(unittest.TestCase):
     def test_priority_domain_bonus_and_flag(self):
         pct, is_priority = self._score("Solutions Engineer", desc="Kubernetes platform infrastructure role")
         self.assertTrue(is_priority)
-        self.assertGreaterEqual(pct, 80)
+        # Priority domain lifts the score above the same title with no domain signal
+        # (baseline-independent: W_DOMAIN carries the bonus regardless of NEUTRAL_FIT).
+        plain, _ = self._score("Solutions Engineer")
+        self.assertGreater(pct, plain)
 
     def test_fit_drives_score(self):
         # Same title/domain; the skill match (matched vs gaps) should move the score a lot.
