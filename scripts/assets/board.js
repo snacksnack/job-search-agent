@@ -4,6 +4,14 @@ const APPLIED = new Set(["applied", "interviewing", "offer", "rejected"]);
 // two synced controls for this one value: active (default) | applied | hidden | closed | all.
 let view = "active";
 
+// Default board view (RC1-523): open showing only the freshest, high-scoring active
+// roles so the page is fast and focused. Every card is still in the DOM (instant
+// search/sort/toggles), so the rest are one click away via the "show all" control.
+// capLifted is set by that control and reset whenever the view changes.
+const DEFAULT_CAP = 200;
+const DEFAULT_SCORE_FLOOR = 60;
+let capLifted = false;
+
 function toast(msg) {
   const t = document.getElementById("toast");
   t.textContent = msg;
@@ -51,6 +59,10 @@ function initFromParams() {
   if (url.get("sort") === "added") {
     document.getElementById("sortSelect").value =
       url.get("dir") === "asc" ? "added-asc" : "added-desc";
+  } else if (!url.get("sort")) {
+    // RC1-523: default to newest-added so the capped default view is "the most
+    // recent N" (best match breaks within-day ties, per applySortSelect).
+    document.getElementById("sortSelect").value = "added-desc";
   }
   // Prefer explicit view; fall back to legacy applied=1/hidden=1 links.
   view = url.get("view") ||
@@ -88,7 +100,7 @@ function applySortSelect() {
     });
   }
   cards.forEach(c => wrap.appendChild(c));
-  refreshViewToggle();
+  applyFilters();   // re-apply the cap in the new order
 }
 
 // Reflect the current view in the checkboxes (mutually exclusive) and highlight the
@@ -102,6 +114,7 @@ function syncControls() {
 
 function setView(v) {
   view = v;
+  capLifted = false;   // returning to a view re-applies the default cap
   syncControls();
   applyFilters();
 }
@@ -114,7 +127,10 @@ function onToggle(group, checked) {
 function applyFilters() {
   const q = document.getElementById("search").value.trim().toLowerCase();
   const prepFilter = document.getElementById("prepFilter").value;
-  let shown = 0;
+  // The capped default view applies only to the plain active view: no search, no
+  // prep filter, cap not lifted. Any explicit filtering shows all matches.
+  const capped = view === "active" && !q && prepFilter === "all" && !capLifted;
+  const candidates = [];
   document.querySelectorAll(".card").forEach(c => {
     const st = c.dataset.status;
     const isApplied = APPLIED.has(st);
@@ -130,11 +146,31 @@ function applyFilters() {
     let visible = inView && matchesSearch(c.dataset.search, q);
     if (prepFilter === "has" && c.dataset.prep !== "1") visible = false;
     if (prepFilter === "none" && c.dataset.prep === "1") visible = false;
+    // Default view floors out weak matches (RC1-523).
+    if (capped && visible && (+c.dataset.score || 0) <= DEFAULT_SCORE_FLOOR) visible = false;
     c.style.display = visible ? "" : "none";
-    if (visible) shown++;
+    if (visible) candidates.push(c);
   });
-  document.getElementById("shownCount").textContent = shown;
+  // Cards are in newest-first order (default sort); in the capped view hide the
+  // overflow past DEFAULT_CAP so the page opens fast and focused.
+  let hiddenByCap = 0;
+  if (capped && candidates.length > DEFAULT_CAP) {
+    candidates.slice(DEFAULT_CAP).forEach(c => { c.style.display = "none"; });
+    hiddenByCap = candidates.length - DEFAULT_CAP;
+  }
+  document.getElementById("shownCount").textContent =
+    capped ? Math.min(candidates.length, DEFAULT_CAP) : candidates.length;
+  const showAllBtn = document.getElementById("showAll");
+  if (showAllBtn) {
+    showAllBtn.style.display = hiddenByCap > 0 ? "" : "none";
+    if (hiddenByCap > 0) showAllBtn.textContent = "+" + hiddenByCap + " more · show all";
+  }
   refreshViewToggle();
+}
+
+function showAllActive() {
+  capLifted = true;
+  applyFilters();
 }
 
 async function decide(id, status, el) {

@@ -37,6 +37,7 @@
       <button type="button" class="cfilter" data-view="hidden" onclick="setView('hidden')" title="Show hidden jobs only">{{HIDDEN}} hidden</button> ·
       <button type="button" class="cfilter" data-view="closed" onclick="setView('closed')" title="Show closed listings only">{{CLOSED}} closed</button> ·
       <span class="cstat">top match {{TOP_MATCH}}</span>
+      <button type="button" class="cfilter showall" id="showAll" style="display:none" onclick="showAllActive()" title="Show all active roles, not just the newest"></button>
     </div>
   </div>
   <table class="jobtable" id="jobtable">

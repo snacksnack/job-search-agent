@@ -8,6 +8,13 @@ let view = "active";
 let sortKey = null;
 let sortDir = "desc";
 
+// Default view cap (RC1-523): open showing only the freshest, high-scoring active
+// rows. Every row stays in the DOM (instant search/sort); the rest are one click
+// away via "show all". capLifted is set by that control, reset when the view changes.
+const DEFAULT_CAP = 200;
+const DEFAULT_SCORE_FLOOR = 60;
+let capLifted = false;
+
 function toast(msg) {
   const t = document.getElementById("toast");
   t.textContent = msg;
@@ -43,7 +50,11 @@ function initFromParams() {
   if (prep) document.getElementById("prepFilter").value = prep;
   view = url.get("view") ||
     (url.get("applied") === "1" ? "applied" : url.get("hidden") === "1" ? "hidden" : "active");
-  if (url.get("sort")) { sortKey = url.get("sort"); sortDir = url.get("dir") || "desc"; }
+  if (url.get("sort")) {
+    sortKey = url.get("sort"); sortDir = url.get("dir") || "desc";
+  } else {
+    sortKey = "added"; sortDir = "desc";   // RC1-523: newest-first default
+  }
   syncControls();
 }
 
@@ -58,6 +69,7 @@ function syncControls() {
 
 function setView(v) {
   view = v;
+  capLifted = false;   // returning to a view re-applies the default cap
   syncControls();
   applyFilters();
 }
@@ -70,7 +82,10 @@ function onToggle(group, checked) {
 function applyFilters() {
   const q = document.getElementById("search").value.trim().toLowerCase();
   const prepFilter = document.getElementById("prepFilter").value;
-  let shown = 0;
+  // The capped default view applies only to the plain active view: no search, no
+  // prep filter, cap not lifted. Any explicit filtering shows all matches.
+  const capped = view === "active" && !q && prepFilter === "all" && !capLifted;
+  const candidates = [];
   document.querySelectorAll("tr.row").forEach(r => {
     const st = r.dataset.status;
     const isApplied = APPLIED.has(st);
@@ -85,11 +100,30 @@ function applyFilters() {
     let visible = inView && matchesSearch(r.dataset.search, q);
     if (prepFilter === "has" && r.dataset.prep !== "1") visible = false;
     if (prepFilter === "none" && r.dataset.prep === "1") visible = false;
+    if (capped && visible && (+r.dataset.score || 0) <= DEFAULT_SCORE_FLOOR) visible = false;
     r.style.display = visible ? "" : "none";
-    if (visible) shown++;
+    if (visible) candidates.push(r);
   });
-  document.getElementById("shownCount").textContent = shown;
+  // Rows are in newest-first order (default sort); in the capped view hide the
+  // overflow past DEFAULT_CAP.
+  let hiddenByCap = 0;
+  if (capped && candidates.length > DEFAULT_CAP) {
+    candidates.slice(DEFAULT_CAP).forEach(r => { r.style.display = "none"; });
+    hiddenByCap = candidates.length - DEFAULT_CAP;
+  }
+  document.getElementById("shownCount").textContent =
+    capped ? Math.min(candidates.length, DEFAULT_CAP) : candidates.length;
+  const showAllBtn = document.getElementById("showAll");
+  if (showAllBtn) {
+    showAllBtn.style.display = hiddenByCap > 0 ? "" : "none";
+    if (hiddenByCap > 0) showAllBtn.textContent = "+" + hiddenByCap + " more · show all";
+  }
   refreshViewToggle();
+}
+
+function showAllActive() {
+  capLifted = true;
+  applyFilters();
 }
 
 function cellVal(row, key) {
@@ -142,7 +176,7 @@ function sortByKey(key) {
   }
   applySort();
   updateSortIndicators();
-  refreshViewToggle();
+  applyFilters();   // re-apply the cap in the new order
 }
 
 async function decide(id, status, el) {
