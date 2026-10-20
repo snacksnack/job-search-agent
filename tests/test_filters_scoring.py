@@ -160,9 +160,18 @@ class DescriptionSkipTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("descriptionSkip", reason)
 
-    def test_presales_se_with_quota_words_kept(self):
+    def test_quota_carrying_se_skipped(self):
+        # Reid's hard-no: a quota-carrying role is dropped even when it is an SE/FDE.
         role = {"title": "Solutions Engineer",
-                "fullDescription": "Partner with sales; you may carry a quota and help close deals on demos."}
+                "fullDescription": "Partner with sales; you carry a quota and help close deals on demos."}
+        ok, reason = pipeline.description_ok(role, self.p)
+        self.assertFalse(ok)
+        self.assertIn("descriptionSkip", reason)
+
+    def test_quota_free_se_kept(self):
+        # A pre-sales SE with no quota signals is still fine.
+        role = {"title": "Solutions Engineer",
+                "fullDescription": "Partner with customers on technical demos, POCs, and integrations."}
         self.assertTrue(pipeline.description_ok(role, self.p)[0])
 
     def test_no_skips_configured_passes(self):

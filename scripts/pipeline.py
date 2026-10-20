@@ -813,13 +813,12 @@ def description_ok(role, profile):
     if not skips:
         return True, None
     desc = (role.get("fullDescription") or role.get("description") or "").lower()
-    title = (role.get("title") or "").lower()
-    presales = any(k in title for k in ["solutions engineer", "forward deployed", "sales engineer",
-                                        "pre-sales", "solutions architect", "solutions consultant"])
     strong = sum(1 for s in QUOTA_SIGNALS if s in desc)
-    # Skip only on strong, central quota signals -- and keep pre-sales SE/FDE roles.
-    if strong >= 2 and not presales:
-        return False, "descriptionSkip: quota-carrying sales role"
+    # Reid's hard-no (2026-10-20): drop any role with strong, central quota signals
+    # regardless of title. Pre-sales SE/FDE roles that are NOT quota-carrying have
+    # no such signals and still pass; quota-carrying ones (even SE/FDE) are out.
+    if strong >= 2:
+        return False, "descriptionSkip: quota-carrying role"
     return True, None
 
 
