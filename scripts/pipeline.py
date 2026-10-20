@@ -1932,6 +1932,57 @@ def refilter(dry_run=False):
     return 0
 
 
+def rescore(dry_run=False):
+    """Recompute matchPercent for every EXISTING role against the current scoring.
+
+    A scoring change -- a weight, NEUTRAL_FIT, or the fit formula -- only reaches a
+    role when that role is re-scored, and run() re-scores new/JD-changed roles only.
+    So merging a scoring change leaves the whole backlog on its old scores until
+    something else touches each role. This pass walks data/jobs.json and re-scores
+    every role, writing nothing else.
+
+    Unlike --refilter it never re-applies the cascade and never archives, and unlike
+    a full run it does no discovery or enrichment. Cached assessments (skillMatch) are
+    read, never modified -- so the cache-once cost model is untouched. --dry-run reports
+    the distribution of changes and writes nothing.
+    """
+    profile = load_json(DATA / "profile.json", {})
+    if not profile:
+        print("ERROR: data/profile.json missing. Run job-search-setup first.", file=sys.stderr)
+        return 1
+    jobs = load_json(DATA / "jobs.json", {"schemaVersion": 2, "roles": [], "meta": {}})
+    roles = jobs.get("roles", [])
+
+    changed = 0
+    deltas = []
+    for role in roles:
+        before = role.get("matchPercent")
+        pct, is_priority = score(role, profile)
+        role["matchPercent"], role["isPriorityDomain"] = pct, is_priority
+        role["rationale"] = make_rationale(role)
+        if pct != before:
+            changed += 1
+            if isinstance(before, (int, float)):
+                deltas.append(pct - before)
+
+    up = sum(1 for d in deltas if d > 0)
+    down = sum(1 for d in deltas if d < 0)
+    print(f"Rescore: {len(roles)} role(s) on board, {changed} score(s) changed ({up} up, {down} down).")
+    if deltas:
+        print(f"  delta: mean {sum(deltas) / len(deltas):+.1f}, max {max(deltas):+d}, min {min(deltas):+d}")
+    if dry_run:
+        print("  --dry-run: no files written.")
+        return 0
+
+    started = datetime.datetime.now().isoformat(timespec="seconds")
+    jobs["roles"] = roles
+    jobs.setdefault("meta", {})["lastRescore"] = started
+    with open(DATA / "jobs.json", "w") as f:
+        json.dump(jobs, f, indent=2, ensure_ascii=False)
+    print(f"  wrote jobs.json ({len(roles)}).")
+    return 0
+
+
 def run(dry_run=False, max_age_days=1):
     profile = load_json(DATA / "profile.json", {})
     search = load_json(DATA / "search.json", {})
@@ -2177,6 +2228,10 @@ def main():
     ap.add_argument("--refilter", action="store_true",
                     help="ONLY re-apply the current filter cascade + scoring to the existing "
                          "board; archive roles that no longer qualify. No discovery.")
+    ap.add_argument("--rescore", action="store_true",
+                    help="ONLY recompute matchPercent for every existing role against the "
+                         "current scoring; no cascade, no archiving, no discovery. Run after "
+                         "a scoring change to land it on the whole board.")
     args = ap.parse_args()
 
     # Snapshot the source-of-truth files before mutating anything (no-op on --dry-run).
@@ -2186,6 +2241,10 @@ def main():
     # --refilter: re-apply cascade + scoring to the existing board, no discovery.
     if args.refilter:
         sys.exit(refilter(dry_run=args.dry_run))
+
+    # --rescore: recompute scores for the existing board only, no cascade/archiving.
+    if args.rescore:
+        sys.exit(rescore(dry_run=args.dry_run))
 
     # --reenrich: enrich-only, no discovery.
     if args.reenrich:
