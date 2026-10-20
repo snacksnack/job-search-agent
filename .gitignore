@@ -24,6 +24,7 @@ data/state.json
 data/manual-check-state.json
 # produced output — discovered/matched roles:
 data/jobs.json
+data/archive.json
 # per-run audit log:
 data/search-log.json
 # rendered on the fly by scripts/serve.py:

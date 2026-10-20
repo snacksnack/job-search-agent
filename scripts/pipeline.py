@@ -1837,6 +1837,87 @@ def resolve_ats(dry_run=False, allow_guess=True, limit=None, min_gain=200):
     return 0
 
 
+def refilter(dry_run=False):
+    """Re-apply the current filter cascade + scoring to the EXISTING board.
+
+    run()'s cascade only judges newly discovered roles; a stored role is never
+    re-tested, so a tightened profile (titles, location, salary) never prunes the
+    backlog it already let in. This pass walks data/jobs.json, re-runs the same
+    cascade and re-scores each role against the current profile, keeps the ones
+    that still qualify, and moves the rest to data/archive.json.
+
+    Honors the hard rules: a role the user has decided on (state.json: the `jobs`
+    map or a top-level id decision) or saved themselves (userSaved) is never
+    archived; an archived role keeps its full record, including any cached
+    skillMatch, so no assessment is ever deleted; every archive is appended to the
+    rejects log with its reason bucket and detail. --dry-run writes nothing.
+    """
+    profile = load_json(DATA / "profile.json", {})
+    if not profile:
+        print("ERROR: data/profile.json missing. Run job-search-setup first.", file=sys.stderr)
+        return 1
+    jobs = load_json(DATA / "jobs.json", {"schemaVersion": 2, "roles": [], "meta": {}})
+    state = load_json(DATA / "state.json", {"jobs": {}})
+    archive = load_json(DATA / "archive.json", {"schemaVersion": 1, "roles": [], "meta": {}})
+    roles = jobs.get("roles", [])
+
+    # A decision lives in state["jobs"][id] or, for some applied roles, as a
+    # top-level id key carrying a status. Treat either as the user's -> protected.
+    decided = set(state.get("jobs", {}).keys())
+    decided |= {k for k, v in state.items()
+                if k not in ("schemaVersion", "jobs") and isinstance(v, dict) and "status" in v}
+
+    kept, archived, rejects = [], [], []
+    started = datetime.datetime.now().isoformat(timespec="seconds")
+    breakdown = {}
+    protected = 0
+    for role in roles:
+        if role.get("id") in decided or role.get("userSaved"):
+            kept.append(role)
+            protected += 1
+            continue
+        ok, reason = title_decision(role.get("title"), profile)
+        if ok and not employer_ok(role.get("company"), profile):
+            ok, reason = False, "skipEmployer"
+        for check in (salary_ok, location_ok, description_ok):
+            if ok:
+                ok, reason = check(role, profile)
+        if ok:
+            pct, is_priority = score(role, profile)
+            role["matchPercent"], role["isPriorityDomain"] = pct, is_priority
+            role["rationale"] = make_rationale(role)
+            kept.append(role)
+        else:
+            role["archivedReason"] = reason
+            role["archivedDate"] = TODAY
+            archived.append(role)
+            key = reason.split(":")[0]
+            breakdown[key] = breakdown.get(key, 0) + 1
+            rejects.append(reject_record(role, reason, started))
+
+    print(f"Refilter: {len(roles)} on board -> keep {len(kept)}, archive {len(archived)} "
+          f"({protected} decided/saved roles protected).")
+    for key, n in sorted(breakdown.items(), key=lambda kv: -kv[1]):
+        print(f"  archive  {key:<18} {n}")
+    if dry_run:
+        print("  --dry-run: no files written.")
+        return 0
+
+    archive["roles"] = archive.get("roles", []) + archived
+    archive.setdefault("meta", {})
+    archive["meta"].update(lastRefilter=started, count=len(archive["roles"]))
+    jobs["roles"] = kept
+    jobs.setdefault("meta", {})
+    jobs["meta"]["lastRefilter"] = started
+    with open(DATA / "jobs.json", "w") as f:
+        json.dump(jobs, f, indent=2, ensure_ascii=False)
+    with open(DATA / "archive.json", "w") as f:
+        json.dump(archive, f, indent=2, ensure_ascii=False)
+    write_rejects_log(rejects)
+    print(f"  wrote jobs.json ({len(kept)}) + archive.json ({len(archive['roles'])} total).")
+    return 0
+
+
 def run(dry_run=False, max_age_days=1):
     profile = load_json(DATA / "profile.json", {})
     search = load_json(DATA / "search.json", {})
@@ -2079,11 +2160,18 @@ def main():
                     help="with --resolve-ats: cap how many companies to attempt this run")
     ap.add_argument("--sweep-only", action="store_true",
                     help="ONLY run the discovery sweep; skip the follow-on re-enrich pass")
+    ap.add_argument("--refilter", action="store_true",
+                    help="ONLY re-apply the current filter cascade + scoring to the existing "
+                         "board; archive roles that no longer qualify. No discovery.")
     args = ap.parse_args()
 
     # Snapshot the source-of-truth files before mutating anything (no-op on --dry-run).
     if not args.dry_run:
         backup_sources()
+
+    # --refilter: re-apply cascade + scoring to the existing board, no discovery.
+    if args.refilter:
+        sys.exit(refilter(dry_run=args.dry_run))
 
     # --reenrich: enrich-only, no discovery.
     if args.reenrich:
