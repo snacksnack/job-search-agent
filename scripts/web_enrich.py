@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-web_enrich.py — I/O helper for one-time browser enrichment of source-only roles.
+web_enrich.py — I/O helper for browser enrichment of source-only roles.
 
 Some roles (LinkedIn / hiring.cafe finds with no Greenhouse/Lever/Ashby API behind
 them) arrive with only a thin snippet. They can't be enriched via the ATS APIs

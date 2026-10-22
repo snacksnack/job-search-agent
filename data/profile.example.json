@@ -106,6 +106,7 @@
       "morningBriefing": true,
       "interviewPrep": true,
       "topN": 10,
+      "enrichCap": 10,
       "autoSend": false
     },
     "board": {

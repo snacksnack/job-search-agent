@@ -105,6 +105,34 @@ class WebEnrichIoTests(unittest.TestCase):
         self.assertEqual(updated, 0)
         self.assertEqual(skipped, 1)
 
+    def _reload_pending_fixture(self, roles):
+        """Point web_enrich at a jobs.json with the given roles (RC1-536 cap/sort tests)."""
+        jobs = {"schemaVersion": 2, "roles": roles, "meta": {}}
+        web_enrich.JOBS_PATH.write_text(json.dumps(jobs))
+
+    def _li(self, rid, pct):
+        u = "https://www.linkedin.com/jobs/view/" + rid
+        return _role(rid, atsUrl="", sourceUrl=u, url=u, fullDescription="thin", matchPercent=pct)
+
+    def test_list_pending_caps_and_sorts_by_match(self):
+        # The daily run (RC1-536) relies on --limit N returning the top-N highest-match
+        # pending roles, so a capped browser pass always enriches the best survivors first.
+        self._reload_pending_fixture([
+            self._li("lo", 55), self._li("hi", 92), self._li("mid", 71),
+        ])
+        rows = web_enrich.list_pending(limit=2)
+        self.assertEqual([r["id"] for r in rows], ["hi", "mid"])
+
+    def test_list_pending_source_filter_linkedin_only(self):
+        # The daily step passes --source linkedin; hiring.cafe stays an on-demand backfill.
+        hc_url = "https://hiring.cafe/jobs/9"
+        self._reload_pending_fixture([
+            self._li("li", 80),
+            _role("hc", atsUrl="", sourceUrl=hc_url, url=hc_url, fullDescription="thin"),
+        ])
+        rows = web_enrich.list_pending(source="linkedin")
+        self.assertEqual({r["id"] for r in rows}, {"li"})
+
 
 if __name__ == "__main__":
     unittest.main()
