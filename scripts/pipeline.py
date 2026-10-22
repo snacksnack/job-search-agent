@@ -226,6 +226,34 @@ def fetch_lever(slug):
     return out
 
 
+def _ashby_location(j):
+    """Compose the location string from Ashby's primary `location` plus any
+    US-eligible `secondaryLocations`, tagging '(Remote)' when `isRemote` is set.
+
+    Ashby exposes isRemote (bool) and secondaryLocations (each a `location` name
+    with an optional `address.postalAddress.addressCountry`). The base fetch read
+    only the primary `location`, so a remote-US role with a non-metro HQ -- e.g.
+    an SF HQ with isRemote=true and a New York secondary -- normalized to
+    'onsite' and was dropped as locationHybrid (RC1-540). Foreign-only secondary
+    offices (addressCountry present and not US) are left out so they can't trip
+    the US-remote scope check in location_ok; a genuinely foreign *primary* is
+    still caught downstream by the non-US rule."""
+    names = [j.get("location")] if j.get("location") else []
+    for sec in j.get("secondaryLocations") or []:
+        name = sec.get("location")
+        if not name or name.strip().lower() == "remote":
+            continue  # 'Remote' secondary is covered by the (Remote) tag below
+        country = (((sec.get("address") or {}).get("postalAddress") or {})
+                   .get("addressCountry") or "").strip().lower()
+        if country and country not in ("united states", "usa", "us"):
+            continue  # drop non-US secondary offices (e.g. Toronto, Montreal)
+        names.append(name)
+    location = ", ".join(dict.fromkeys(n for n in names if n))
+    if j.get("isRemote"):
+        location = (location + " (Remote)").strip() if location else "Remote"
+    return location or None
+
+
 def fetch_ashby(slug):
     data = http_get_json(f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true")
     out = []
@@ -241,7 +269,7 @@ def fetch_ashby(slug):
                     cmax = xv if cmax is None else max(cmax, xv)
         out.append({
             "title": j.get("title"),
-            "location": j.get("location"),
+            "location": _ashby_location(j),
             "url": j.get("jobUrl"),
             "description": j.get("descriptionPlain", "") or "",
             "postedDate": (j.get("publishedAt") or "")[:10] or None,

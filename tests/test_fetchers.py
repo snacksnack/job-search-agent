@@ -407,3 +407,71 @@ class BambooHRFetcherTests(unittest.TestCase):
         r = pipeline.enrich_from_ats("https://acme.recruitee.com/o/solutions-engineer")
         self.assertEqual(r["title"], "Solutions Engineer")
         self.assertIn("Pre-sales.", r["description"])
+
+
+# ------------------------------------------------------- Ashby isRemote (RC1-540)
+def _us(name, **extra):
+    return {"location": name, "address": {"postalAddress": dict(
+        {"addressCountry": "United States"}, **extra)}}
+
+
+# Mirrors the real Baseten payload shape: a remote-US role with a non-metro HQ
+# (San Francisco), isRemote=true, and secondaryLocations mixing US offices
+# (New York, Seattle, a bare "Remote") with foreign ones (Toronto, Montreal).
+ASHBY_PAYLOAD = {
+    "jobs": [
+        {"title": "Technical Program Manager, Forward Deployed Engineering",
+         "location": "San Francisco", "isRemote": True,
+         "jobUrl": "https://jobs.ashbyhq.com/baseten/976f89ef",
+         "descriptionPlain": "Own cross-functional delivery.",
+         "publishedAt": "2026-10-22T00:00:00Z",
+         "secondaryLocations": [
+             {"location": "Remote", "address": {"postalAddress": {"addressCountry": "United States"}}},
+             {"location": "Toronto", "address": {"postalAddress": {"addressCountry": "Canada"}}},
+             _us("New York", addressRegion="New York"),
+             {"location": "Montreal", "address": {"postalAddress": {"addressCountry": "Canada"}}},
+             _us("Seattle", addressRegion="Washington")]},
+        {"title": "Office Manager", "location": "Austin", "isRemote": False,
+         "jobUrl": "https://jobs.ashbyhq.com/baseten/austin-om",
+         "descriptionPlain": "On-site role.", "publishedAt": "2026-10-20T00:00:00Z",
+         "secondaryLocations": []},
+    ]
+}
+
+
+class AshbyFetcherTests(unittest.TestCase):
+    def setUp(self):
+        self._orig = pipeline.http_get_json
+        pipeline.http_get_json = lambda url, timeout=20: ASHBY_PAYLOAD
+
+    def tearDown(self):
+        pipeline.http_get_json = self._orig
+
+    def test_remote_true_folds_us_secondaries_and_drops_foreign(self):
+        tpm, office = pipeline.fetch_ashby("baseten")
+        # primary + US secondaries, Canada dropped, (Remote) tag applied, bare
+        # "Remote" secondary deduped under the tag:
+        self.assertEqual(tpm["location"], "San Francisco, New York, Seattle (Remote)")
+        self.assertNotIn("Toronto", tpm["location"])
+        self.assertNotIn("Montreal", tpm["location"])
+        # a non-remote role with no secondaries keeps its plain location, no tag:
+        self.assertEqual(office["location"], "Austin")
+        self.assertNotIn("Remote", office["location"])
+
+    def test_remote_us_role_with_nonmetro_hq_survives_location_filter(self):
+        # The RC1-540 regression: SF HQ + isRemote used to normalize to 'onsite'
+        # and get dropped as locationHybrid. It must now pass location_ok.
+        profile = {"preferences": {"locationRule": {
+            "includeRemoteScope": "US",
+            "metroIncludeAnyArrangement": ["new york"]}}}
+        tpm = pipeline.fetch_ashby("baseten")[0]
+        role = pipeline.normalize(tpm, "ashby")
+        self.assertEqual(role["remoteStatus"], "remote")
+        ok, reason = pipeline.location_ok(role, profile)
+        self.assertTrue(ok, f"expected include, got reject: {reason}")
+
+    def test_remote_true_with_no_location_is_plain_remote(self):
+        payload = {"jobs": [{"title": "TPM", "location": None, "isRemote": True,
+                             "jobUrl": "u", "descriptionPlain": "", "secondaryLocations": []}]}
+        pipeline.http_get_json = lambda url, timeout=20: payload
+        self.assertEqual(pipeline.fetch_ashby("x")[0]["location"], "Remote")
