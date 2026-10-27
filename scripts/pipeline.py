@@ -79,6 +79,11 @@ TITLE_KW = ["technical program manager", "tpm", "solutions engineer", "solution 
 QUOTA_SIGNALS = ["sales quota", "carry a quota", "quota-carrying", "quota carrying",
                  "individual quota", "ote", "on-target earnings", "commission", "close deals",
                  "closing deals", "revenue target", "bookings target", "pipeline generation"]
+# Word-bounded: a bare substring check let "ote" match inside "note" and product copy
+# ("built for agents to close deals faster") count as a quota signal, silently dropping
+# quota-free TPM roles (Perchwell Senior TPM, 2026-10-27).
+QUOTA_SIGNAL_RES = [re.compile(r"(?<![a-z])" + re.escape(s) + r"(?![a-z])")
+                    for s in QUOTA_SIGNALS]
 
 # NYC-metro detection. Catches "New York", "New York City", "NYC", "New York, NY",
 # the boroughs, etc. The (?<![a-z]) / (?![a-z]) guards act as punctuation-agnostic
@@ -841,7 +846,7 @@ def description_ok(role, profile):
     if not skips:
         return True, None
     desc = (role.get("fullDescription") or role.get("description") or "").lower()
-    strong = sum(1 for s in QUOTA_SIGNALS if s in desc)
+    strong = sum(1 for rx in QUOTA_SIGNAL_RES if rx.search(desc))
     # Reid's hard-no (2026-10-20): drop any role with strong, central quota signals
     # regardless of title. Pre-sales SE/FDE roles that are NOT quota-carrying have
     # no such signals and still pass; quota-carrying ones (even SE/FDE) are out.
