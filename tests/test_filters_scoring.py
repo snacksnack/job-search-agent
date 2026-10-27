@@ -205,6 +205,22 @@ class DescriptionSkipTests(unittest.TestCase):
         role = {"title": "X", "fullDescription": "carry a quota; close deals; commission"}
         self.assertTrue(pipeline.description_ok(role, p)[0])
 
+    def test_quota_signals_are_word_bounded(self):
+        # "ote" inside "note" and product copy about the *users* closing deals
+        # are not quota signals (Perchwell Senior TPM false positive, 2026-10-27).
+        role = {"title": "Senior Technical Program Manager",
+                "fullDescription": "A platform built for agents to close deals faster. "
+                                   "Note: we only consider US-authorized candidates."}
+        self.assertTrue(pipeline.description_ok(role, self.p)[0])
+
+    def test_standalone_ote_still_counts(self):
+        role = {"title": "Solutions Engineer",
+                "fullDescription": "Compensation is $150K base with OTE of $220K; "
+                                   "you will carry a quota from day one."}
+        ok, reason = pipeline.description_ok(role, self.p)
+        self.assertFalse(ok)
+        self.assertIn("descriptionSkip", reason)
+
 
 class EmployerRuleTests(unittest.TestCase):
     def setUp(self):
