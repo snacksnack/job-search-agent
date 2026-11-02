@@ -107,6 +107,82 @@ class HyphenatedTitleTests(unittest.TestCase):
         self.assertFalse(pipeline.title_decision("Manager, Sales Engineering", self.p)[0])
 
 
+class SeniorityCeilingTests(unittest.TestCase):
+    """RC1-589: skipTitleRules run AFTER alwaysIncludeTitles and always-include
+    matching is substring-based, so "Director, Forward Deployed Engineering" was
+    admitted at 95% -- "Forward Deployed Engineering" contains the always-include
+    "Forward Deployed Engineer" and the ceiling never got a look. 16 such roles
+    were on the board, two of them above everything else."""
+
+    def setUp(self):
+        self.p = make_profile()      # already carries the ceiling category
+        # The live profile lists a bare "Program Manager" as an adjacent include;
+        # the fixture doesn't, and the rank-suffix carve-out below depends on it.
+        self.p["matching"]["secondaryIncludeTitles"]["titles"].append("Program Manager")
+
+    def _ok(self, title):
+        return pipeline.title_decision(title, self.p)[0]
+
+    def test_leadership_seats_rejected_even_when_they_contain_a_target_title(self):
+        for t in ["Director, Forward Deployed Engineering",
+                  "Strategic Solutions Engineering Director",
+                  "Head of Solutions Engineering",
+                  "VP, Head of Forward Deployed Engineering",
+                  "Director, Technical Program Management",
+                  "Director, Solutions Engineer Forward Deployed - Splunk"]:
+            ok, reason = pipeline.title_decision(t, self.p)
+            self.assertFalse(ok, t)
+            self.assertIn("people-leadership", reason)
+
+    def test_whole_word_only(self):
+        """A rank term must be its own word, or "Directory Services" is a Director."""
+        self.assertTrue(self._ok("Technical Program Manager, Directory Services"))
+
+    def test_chief_of_staff_is_a_team_not_a_rank(self):
+        """Live titles at 77% and 76%: the IC is a TPM, "Chief of Staff" is the org."""
+        self.assertTrue(self._ok("Lead Technical Program Manager - Chief of Staff Services"))
+        self.assertTrue(self._ok("Principal Technical Program Manager - Chief of Staff"))
+
+    def test_bank_rank_suffix_is_not_an_office(self):
+        """At financial firms the rank is a seniority band TRAILING an IC title.
+        The third of these is a role the user saved himself, which is the check on
+        the rule."""
+        for t in ["XPG Technical Program Manager - Vice President",
+                  "Kinexys Program Manager - Vice President",
+                  "Technical Project Manager - Strategic Initiatives Office, Vice President"]:
+            self.assertTrue(self._ok(t), t)
+
+    def test_rank_leading_the_title_is_still_an_office(self):
+        """The carve-out is about position: a rank that LEADS is the seat, whatever
+        follows it. This one costs a real 71% role (BNY), named in the PR."""
+        ok, reason = pipeline.title_decision("Senior Vice President, Forward Deployed Engineer",
+                                             self.p)
+        self.assertFalse(ok)
+        self.assertIn("people-leadership", reason)
+
+    def test_rank_must_be_terminal_for_the_carve_out(self):
+        """A rank buried mid-title is not a trailing band."""
+        self.assertFalse(self._ok("Solutions Engineer, Director of Partner Programs"))
+        self.assertTrue(self._ok("Solutions Engineer - Vice President"))
+
+    def test_target_title_must_match_as_a_whole_word(self):
+        """What separates a real director seat from a bank rank: "engineering" is
+        not the word "engineer", so nothing rescues this one."""
+        self.assertFalse(self._ok("Solutions Engineering Director"))
+
+    def test_ic_targets_unaffected(self):
+        for t in ["Technical Program Manager", "Senior Technical Program Manager",
+                  "Forward Deployed Engineer", "Solutions Engineer"]:
+            self.assertTrue(self._ok(t), t)
+
+    def test_no_ceiling_category_configured_is_a_no_op(self):
+        p = make_profile()
+        p["matching"]["skipTitleRules"] = [
+            r for r in p["matching"]["skipTitleRules"]
+            if "seniority too high" not in (r.get("category") or "").lower()]
+        self.assertIsNone(pipeline._seniority_ceiling_hit("director, engineering", p))
+
+
 class ScoringTests(unittest.TestCase):
     def setUp(self):
         self.p = make_profile()

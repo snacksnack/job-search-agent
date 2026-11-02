@@ -207,6 +207,51 @@ class LocationTests(unittest.TestCase):
             self.assertFalse(ok, loc)
             self.assertIn("locationNonUS", reason)
 
+    def test_us_state_or_city_is_a_us_signal_against_a_foreign_city(self):
+        """RC1-589: US_RE knew country and region words but no US places, so a
+        dual-site posting tripped the non-US rule on its foreign city while its US
+        city went unseen. CoolIT's "Remote (San Francisco or Calgary)" TPM read as
+        non-US, which is why RC1-587 added no Canadian cities."""
+        for loc in ["Remote (San Francisco or Calgary)", "Remote - Austin, Texas or Toronto",
+                    "Boston or London", "Remote - Illinois; Remote - Ontario"]:
+            ok, reason = pipeline.location_ok(
+                {"title": "Technical Program Manager", "location": loc,
+                 "remoteStatus": "remote", "remoteNotes": ""}, self.p)
+            self.assertTrue(ok, f"expected include for {loc!r} ({reason})")
+
+    def test_foreign_only_locations_still_excluded(self):
+        for loc in ["Remote - Toronto", "Remote (Calgary)", "London or Dublin"]:
+            ok, reason = pipeline.location_ok(
+                {"title": "Technical Program Manager", "location": loc,
+                 "remoteStatus": "remote", "remoteNotes": ""}, self.p)
+            self.assertFalse(ok, loc)
+            self.assertIn("locationNonUS", reason)
+
+    def test_two_letter_codes_are_not_us_signals(self):
+        """"CA" is also Canada's country code and appears as one ("Montreal, QC,
+        CA"), so postal abbreviations are deliberately not in US_RE."""
+        self.assertIsNone(pipeline.US_RE.search("montreal, qc, ca"))
+
+    def test_arrangement_stated_as_prose_still_excludes(self):
+        """RC1-589: the check looked for the literal tokens hybrid/onsite/in-office,
+        so an in-office requirement written out in prose read as fully remote."""
+        for notes in ["3 days a week in the Austin office",
+                      "2 days per week in our Chicago hub",
+                      "Expected in the office Tuesdays and Thursdays"]:
+            ok, reason = pipeline.location_ok(
+                {"title": "Solutions Engineer", "location": "Remote - Austin",
+                 "remoteStatus": "remote", "remoteNotes": notes}, self.p)
+            self.assertFalse(ok, notes)
+            self.assertIn("locationHybrid", reason)
+
+    def test_prose_check_does_not_fire_on_a_plain_remote_role(self):
+        for notes in ["Fully remote, work from anywhere in the US",
+                      "We hold one offsite a year", ""]:
+            ok, reason = pipeline.location_ok(
+                {"title": "Solutions Engineer", "location": "Remote - US",
+                 "remoteStatus": "remote", "remoteNotes": notes}, self.p)
+            self.assertTrue(ok, f"{notes!r} ({reason})")
+
 class NormalizeRemoteStatusTests(unittest.TestCase):
     """normalize() derives remoteStatus from the location string when a source
     doesn't supply one. A country name is an eligibility scope, not a worksite."""
@@ -229,6 +274,29 @@ class NormalizeRemoteStatusTests(unittest.TestCase):
             role = pipeline.normalize({"title": "TPM", "company": "X", "location": loc},
                                       "linkedinKeyword")
             self.assertEqual(role["remoteStatus"], expected, loc)
+
+class MergeRederivesRemoteStatusTests(unittest.TestCase):
+    """RC1-589: apply_content_change updated a role's location but left the
+    remoteStatus that had been DERIVED from the old one, stranding a contradiction
+    on the role. This is the cause behind the SingleStore req in RC1-588."""
+
+    def test_location_change_adopts_the_incoming_derived_status(self):
+        ex = {"id": "r", "title": "Forward Deployment Engineer", "location": "United States",
+              "remoteStatus": "onsite", "fullDescription": "x" * 400}
+        inc = pipeline.normalize({"title": "Forward Deployment Engineer", "company": "SingleStore",
+                                  "location": "United States (Remote)"}, "linkedinKeyword")
+        changed, _ = pipeline.apply_content_change(ex, inc)
+        self.assertTrue(changed)
+        self.assertEqual(ex["location"], "United States (Remote)")
+        self.assertEqual(ex["remoteStatus"], "remote")
+
+    def test_unchanged_location_leaves_the_status_alone(self):
+        ex = {"id": "r", "title": "TPM", "location": "Remote - US", "remoteStatus": "remote",
+              "fullDescription": "x" * 400}
+        inc = {"title": "TPM", "location": "Remote - US", "remoteStatus": "onsite"}
+        changed, _ = pipeline.apply_content_change(ex, inc)
+        self.assertFalse(changed)
+        self.assertEqual(ex["remoteStatus"], "remote")
 
 
 if __name__ == "__main__":
