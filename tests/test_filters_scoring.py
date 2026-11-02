@@ -66,6 +66,47 @@ class TitleDecisionTests(unittest.TestCase):
         self.assertTrue(self._ok("Senior Manager, Technical Program Management"))
 
 
+class HyphenatedTitleTests(unittest.TestCase):
+    """RC1-588: title matching is substring-based, so a hyphen was enough to lose
+    a primary target title. "Forward-Deployed Engineer" was rejected as
+    titleMismatch, and 5 distinct spellings appear in the rejects history."""
+
+    def setUp(self):
+        self.p = make_profile()
+
+    def test_hyphenated_target_titles_included(self):
+        for t in ["Forward-Deployed Engineer", "Senior Forward-Deployed Engineer, Federal",
+                  "Forward-Deployed  Engineer", "Forward/Deployed Engineer"]:
+            self.assertTrue(pipeline.title_decision(t, self.p)[0], t)
+
+    def test_hyphenated_and_spaced_titles_score_the_same(self):
+        """The filter and the scorer have to agree, or a rescued title clears the
+        cascade and then scores at the no-signal floor."""
+        role = lambda t: {"title": t, "fullDescription": "", "tags": []}
+        self.assertEqual(pipeline.score(role("Forward-Deployed Engineer"), self.p),
+                         pipeline.score(role("Forward Deployed Engineer"), self.p))
+
+    def test_hyphenated_configured_phrases_still_match(self):
+        """Normalization is applied to both sides. A phrase carrying its own
+        hyphen -- "Manager - Sales Engineering" in leadershipOverrideTitles --
+        would be unmatchable if only the incoming title were normalized, letting
+        a people-manager role through."""
+        self.p["matching"]["leadershipOverrideTitles"] = ["Manager - Sales Engineering"]
+        for t in ["Manager - Sales Engineering", "Manager -Sales Engineering",
+                  "Manager  -  Sales Engineering"]:
+            ok, reason = pipeline.title_decision(t, self.p)
+            self.assertFalse(ok, t)
+            self.assertIn("people-leadership", reason)
+
+    def test_ic_manager_guard_survives_normalization(self):
+        """The "Manager, <team>" override is skipped when Manager is preceded by
+        Program/Project/Product, so IC titles survive. Normalizing both sides must
+        not disturb that."""
+        self.assertTrue(pipeline.title_decision("Program Manager, Sales Engineering",
+                                                self.p)[0])
+        self.assertFalse(pipeline.title_decision("Manager, Sales Engineering", self.p)[0])
+
+
 class ScoringTests(unittest.TestCase):
     def setUp(self):
         self.p = make_profile()

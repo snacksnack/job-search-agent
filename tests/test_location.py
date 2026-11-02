@@ -153,6 +153,60 @@ class LocationTests(unittest.TestCase):
                     "Ontario - Remote", "Remote - Maine, USA"]:
             self.assertFalse(pipeline._location_names_no_geography(loc), repr(loc))
 
+    def test_metro_named_only_in_the_title(self):
+        """RC1-588, mirror of RC1-587: SingleStore's "Forward Deployment Engineer-
+        Greater NYC" names the metro in the title and nowhere else. A metro in the
+        title is where the seat is, and it qualifies in any arrangement."""
+        ok, reason = pipeline.location_ok(
+            {"title": "Forward Deployment Engineer- Greater NYC",
+             "location": "United States", "remoteStatus": "onsite", "remoteNotes": ""}, self.p)
+        self.assertTrue(ok, reason)
+        # also via the profile's own metro list, not just NY_METRO_RE
+        ok, _ = pipeline.location_ok(
+            {"title": "Sales Engineer - Brooklyn", "location": "Austin, TX (Hybrid)",
+             "remoteStatus": "hybrid", "remoteNotes": ""}, self.p)
+        self.assertTrue(ok)
+
+    def test_stale_derived_status_does_not_outrank_a_remote_location(self):
+        """remoteStatus is normally DERIVED from the location, so a stale
+        derivation must not override the text it came from. SingleStore's req is
+        stored as "United States (Remote)" with remoteStatus "onsite" -- derived
+        in August from a bare "United States", then a cross-source merge replaced
+        the location without re-deriving it (RC1-588)."""
+        ok, reason = pipeline.location_ok(
+            {"title": "Forward Deployment Engineer", "location": "United States (Remote)",
+             "remoteStatus": "onsite", "remoteNotes": ""}, self.p)
+        self.assertTrue(ok, reason)
+
+    def test_a_city_location_is_still_onsite(self):
+        """Narrow on purpose: normalize() derives "onsite" from any location
+        naming a city, and that derivation is the ONLY onsite signal those roles
+        carry. Ignoring remoteStatus outright would admit every one of them."""
+        for loc in ["Milpitas, CA", "Austin, TX", "San Francisco, CA"]:
+            ok, reason = pipeline.location_ok(
+                {"title": "Solutions Engineer", "location": loc,
+                 "remoteStatus": "onsite", "remoteNotes": ""}, self.p)
+            self.assertFalse(ok, f"expected exclude for {loc!r}")
+            self.assertIn("locationHybrid", reason)
+
+    def test_a_remote_location_with_an_explicit_arrangement_note_still_excluded(self):
+        """The override only discards the derived status. Arrangement language in
+        remoteNotes is real information and still rules the role out."""
+        ok, reason = pipeline.location_ok(
+            {"title": "Solutions Engineer", "location": "Remote - Austin",
+             "remoteStatus": "onsite", "remoteNotes": "Hybrid, 3 days a week in Austin"},
+            self.p)
+        self.assertFalse(ok)
+        self.assertIn("locationHybrid", reason)
+
+    def test_foreign_remote_still_excluded_despite_the_status_override(self):
+        for loc in ["United Kingdom, London (Remote)", "Canada (Remote)"]:
+            ok, reason = pipeline.location_ok(
+                {"title": "Forward Deployed Engineer", "location": loc,
+                 "remoteStatus": "onsite", "remoteNotes": ""}, self.p)
+            self.assertFalse(ok, loc)
+            self.assertIn("locationNonUS", reason)
+
 class NormalizeRemoteStatusTests(unittest.TestCase):
     """normalize() derives remoteStatus from the location string when a source
     doesn't supply one. A country name is an eligibility scope, not a worksite."""
