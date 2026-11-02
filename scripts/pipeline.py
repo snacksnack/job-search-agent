@@ -807,8 +807,22 @@ def _leadership_title_hit(phrase, t):
     return False
 
 
+def _title_text(title):
+    """Lowercased title with hyphens and slashes read as spaces, runs of
+    whitespace collapsed to one.
+
+    Title matching is substring-based, so "Forward-Deployed Engineer" never
+    matched the "Forward Deployed Engineer" always-include and was rejected as
+    titleMismatch -- a primary target title losing to a hyphen (RC1-588). The
+    same normalization is applied to BOTH sides, here and in score(): a
+    configured phrase may carry its own hyphen ("Manager - Sales Engineering" in
+    leadershipOverrideTitles), and normalizing only the incoming title would make
+    that phrase unmatchable and let a people-manager role through."""
+    return " ".join(re.sub(r"[-/\u2010-\u2015]+", " ", (title or "").lower()).split())
+
+
 def title_decision(title, profile):
-    t = (title or "").lower()
+    t = _title_text(title)
     matching = profile.get("matching", {})
     # People-leadership overrides beat the always-include list: "Senior Manager,
     # Sales Engineering" contains "sales engineer", and skip rules only run
@@ -816,23 +830,23 @@ def title_decision(title, profile):
     # Manager-of-team titles need this pre-check. A bare "Manager" term can't
     # go in skip rules — the core IC targets are Manager titles (TPM etc.).
     for lo in matching.get("leadershipOverrideTitles", []):
-        if _leadership_title_hit(lo.lower(), t):
+        if _leadership_title_hit(_title_text(lo), t):
             return False, "titleMismatch: Seniority too high (people-leadership)"
-    if any(a.lower() in t for a in matching.get("alwaysIncludeTitles", [])):
+    if any(_title_text(a) in t for a in matching.get("alwaysIncludeTitles", [])):
         return True, None
     # Explicit secondary includes beat category skips, same as always-includes —
     # otherwise "Technical Account Manager" dies on the Sales rule's "Account
     # Manager" substring even when listed as an adjacent include. They still
     # rank lower via scoring (required=60).
-    secondary = [s.lower() for s in matching.get("secondaryIncludeTitles", {}).get("titles", [])]
+    secondary = [_title_text(s) for s in matching.get("secondaryIncludeTitles", {}).get("titles", [])]
     if any(s in t for s in secondary):
         return True, None
     for rule in matching.get("skipTitleRules", []):
         for st in rule.get("titles", []):
-            if st.lower() in t:
+            if _title_text(st) in t:
                 return False, f"titleMismatch: {rule.get('category')}"
-    targets = [x.lower() for x in profile.get("preferences", {}).get("targetTitles", [])]
-    if any(tt in t for tt in targets) or any(k in t for k in TITLE_KW):
+    targets = [_title_text(x) for x in profile.get("preferences", {}).get("targetTitles", [])]
+    if any(tt in t for tt in targets) or any(_title_text(k) in t for k in TITLE_KW):
         return True, None
     return False, "titleMismatch: no target-title signal"
 
@@ -865,10 +879,39 @@ def _location_names_no_geography(location):
 
 def location_ok(role, profile):
     lr = profile.get("preferences", {}).get("locationRule", {})
-    text = f"{role.get('location','')} {role.get('remoteStatus','')} {role.get('remoteNotes','')}".lower()
+    location = (role.get("location") or "").lower()
+    status = (role.get("remoteStatus") or "").lower()
+    notes = (role.get("remoteNotes") or "").lower()
+    # remoteStatus is normally DERIVED from the location string, so a stale
+    # derivation must not outrank the text it came from. SingleStore's "Forward
+    # Deployment Engineer- Greater NYC" is stored as location "United States
+    # (Remote)" with remoteStatus "onsite": the status was derived in August from
+    # a bare "United States" (the RC1-586 bug) and a later cross-source merge
+    # replaced the location without re-deriving it, so the role read as onsite
+    # and an NYC-metro FDE req sat invisible on the board for two months.
+    #
+    # Narrow on purpose. Dropping remoteStatus from the arrangement test outright
+    # would admit every onsite city role, because normalize() derives "onsite"
+    # from any location naming a city and that derivation is their ONLY onsite
+    # signal. Only a location that itself says remote may override it (RC1-588).
+    #
+    # Safe because no source ever supplies "onsite"/"hybrid": the fetchers set
+    # remoteStatus only to "remote" (the remote-only aggregator feeds), so every
+    # onsite/hybrid value in the store came out of normalize(). If a source ever
+    # starts reporting an arrangement directly, this needs a provenance flag
+    # rather than an inference. Arrangement language in remoteNotes is real
+    # information either way, and still rules the role out below.
+    if "remote" in location and status in ("onsite", "hybrid"):
+        status = ""
+    text = f"{location} {status} {notes}"
     metro = [m.lower() for m in lr.get("metroIncludeAnyArrangement", [])]
     us_scope = lr.get("includeRemoteScope", "US").upper() == "US"
-    if NY_METRO_RE.search(text) or any(m in text for m in metro):
+    # The metro can be named in the title and nowhere else ("... - Greater NYC").
+    # Mirror of RC1-587, which taught the non-US rule to read the title: a metro
+    # in the title is where the seat is, and it qualifies in any arrangement.
+    title = _title_text(role.get("title"))
+    if (NY_METRO_RE.search(text) or any(m in text for m in metro)
+            or NY_METRO_RE.search(title) or any(m in title for m in metro)):
         return True, None                  # NYC metro, any arrangement
 
     # Territory vs worksite. A non-US token in the TITLE is a location signal only
@@ -1022,20 +1065,22 @@ def flag_stale_assessment(role):
 
 def score(role, profile):
     cand = profile.get("candidate", {})
-    title = (role.get("title") or "").lower()
+    # Same normalization as title_decision: otherwise "Forward-Deployed Engineer"
+    # clears the cascade and then scores at the no-signal floor (RC1-588).
+    title = _title_text(role.get("title"))
     matching = profile.get("matching", {})
     text = " ".join(str(role.get(k, "")) for k in ("title", "domain", "fullDescription", "description"))
     text += " " + " ".join(role.get("tags", []))
 
     # required_match: strength of the title/role-type signal
-    always = [a.lower() for a in matching.get("alwaysIncludeTitles", [])]
-    targets = [x.lower() for x in profile.get("preferences", {}).get("targetTitles", [])]
-    secondary = [s.lower() for s in matching.get("secondaryIncludeTitles", {}).get("titles", [])]
+    always = [_title_text(a) for a in matching.get("alwaysIncludeTitles", [])]
+    targets = [_title_text(x) for x in profile.get("preferences", {}).get("targetTitles", [])]
+    secondary = [_title_text(s) for s in matching.get("secondaryIncludeTitles", {}).get("titles", [])]
     if any(a in title for a in always) or any(tt in title for tt in targets):
         required = 95
     elif any(s in title for s in secondary):
         required = 60   # adjacent title (e.g. Technical Project Manager): include but rank below Program Manager
-    elif any(k in title for k in TITLE_KW):
+    elif any(_title_text(k) in title for k in TITLE_KW):
         required = 80
     else:
         required = 55
