@@ -102,7 +102,33 @@ NY_METRO_RE = re.compile(
 # signal; NON_US_RE finds a foreign country/region. A role with a foreign location and NO
 # US signal is excluded (e.g. "Remote - Netherlands"), but one that names both is kept
 # (e.g. "US-Remote, London, England UK" is a US-remote role).
-US_RE = re.compile(r"(?<![a-z])(u\.?s\.?a?|united states|north america|americas|stateside)(?![a-z])")
+US_RE = re.compile(
+    r"(?<![a-z])("
+    r"u\.?s\.?a?|united states|north america|americas|stateside|"
+    # US states and DC, spelled out. Without these, US_RE saw only country and
+    # region words, so a dual-site posting tripped the non-US rule on its foreign
+    # city while its US city went unseen: "Remote (San Francisco or Calgary)" read
+    # as non-US (RC1-589). Two-letter postal codes are deliberately NOT here --
+    # "CA" is also Canada's country code and appears as one ("Montreal, QC, CA").
+    r"alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|"
+    r"florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|"
+    r"louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|"
+    r"missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|"
+    r"north carolina|north dakota|ohio|oklahoma|pennsylvania|rhode island|"
+    r"south carolina|south dakota|tennessee|texas|utah|vermont|virginia|"
+    r"washington|west virginia|wisconsin|wyoming|"
+    r"washington,? d\.?c\.?|district of columbia|new england|"
+    # Major US metros. "new york" is covered by NY_METRO_RE for inclusion but is
+    # listed here too, since this regex answers a different question (is there a
+    # US signal at all). Cities whose names also exist abroad -- Ontario CA,
+    # Toronto OH, New Brunswick NJ -- are left out on purpose.
+    r"san francisco|los angeles|san diego|san jose|seattle|portland|denver|"
+    r"austin|dallas|houston|chicago|boston|atlanta|miami|philadelphia|"
+    r"pittsburgh|detroit|minneapolis|nashville|charlotte|raleigh|phoenix|"
+    r"salt lake city|kansas city|st\.? louis|new orleans|las vegas|"
+    r"bay area|silicon valley|brooklyn|manhattan"
+    r")(?![a-z])"
+)
 NON_US_RE = re.compile(
     r"(?<![a-z])("
     # "england" must not match inside "New England" -- it would reject US roles
@@ -120,15 +146,17 @@ NON_US_RE = re.compile(
     # reached the board that way (RC1-587). "ontario" is guarded because Ontario,
     # California is a real US city; the others have no US collision.
     #
-    # Deliberately provinces only, no more cities. US_RE recognizes country and
-    # region words, not US cities, so a dual-site posting trips the non-US rule
-    # on its foreign city while its US city goes unseen: adding "calgary" turned
-    # CoolIT's "Remote (San Francisco or Calgary)" TPM into a locationNonUS
-    # rejection. The asymmetry already exists for toronto/vancouver; widening it
-    # needs US_RE to learn US cities, which is a different change.
+    # RC1-587 held this to provinces only, because US_RE knew no US places and a
+    # dual-site posting would trip on its foreign city while its US city went
+    # unseen -- adding "calgary" turned CoolIT's "Remote (San Francisco or
+    # Calgary)" TPM into a locationNonUS rejection. US_RE now carries US states
+    # and metros (RC1-589), so the cities are safe to add: that posting keeps its
+    # US signal from "San Francisco". "ontario" is still guarded because Ontario,
+    # California is a real US city.
     r"ontario(?!,? ?(?:ca|california|or|oregon)(?![a-z]))|"
     r"quebec|british columbia|alberta|manitoba|saskatchewan|nova scotia|"
-    r"newfoundland"
+    r"newfoundland|ottawa|montreal|calgary|edmonton|winnipeg|halifax|"
+    r"mississauga|kitchener|waterloo, on"
     r")(?![a-z])"
 )
 
@@ -142,6 +170,16 @@ US_NATIONWIDE_ONLY_RE = re.compile(
     r"u\.?s\.?|u\.?s\.?a\.?|usa|united states(?: of america)?|"
     r"nationwide|anywhere in the (?:u\.?s\.?|united states)"
     r")$"
+)
+
+# An in-office requirement stated in prose rather than with one of the literal
+# tokens: "3 days a week in the Austin office" carried no "hybrid"/"onsite"/
+# "in-office" token and read as fully remote (RC1-589). Only ever applied to the
+# location / remoteStatus / remoteNotes fields, never the JD, so "in the office"
+# can't collide with body copy like "our office culture".
+ARRANGEMENT_RE = re.compile(
+    r"hybrid|on-?site|in[- ]office|in[- ]the[- ]office|"
+    r"\d+\s*\+?\s*days?\s*(?:a|per)\s*week\s+(?:in|at|from|on)(?![a-z])"
 )
 
 # Words that describe an ARRANGEMENT, not a place. Stripping them is how we tell a
@@ -821,9 +859,72 @@ def _title_text(title):
     return " ".join(re.sub(r"[-/\u2010-\u2015]+", " ", (title or "").lower()).split())
 
 
+def _ceiling_titles(profile):
+    """The profile's people-leadership ceiling terms (Director / Head of / VP ...),
+    read off the skipTitleRules category that already declares them."""
+    out = []
+    for rule in profile.get("matching", {}).get("skipTitleRules", []):
+        if "seniority too high" in (rule.get("category") or "").lower():
+            out += rule.get("titles", [])
+    return out
+
+
+def _ic_target_titles(profile):
+    every = (profile.get("matching", {}).get("alwaysIncludeTitles", [])
+             + profile.get("matching", {}).get("secondaryIncludeTitles", {}).get("titles", [])
+             + profile.get("preferences", {}).get("targetTitles", []))
+    return [x for x in (_title_text(e) for e in every) if x]
+
+
+def _seniority_ceiling_hit(t, profile):
+    """A people-leadership rank in `t`, matched as a WHOLE WORD, or None.
+
+    Runs before the always-include list. skipTitleRules run after always-include
+    and always-include matching is substring-based, so "Director, Forward
+    Deployed Engineering" was admitted at 95%: "Forward Deployed Engineering"
+    contains the always-include "Forward Deployed Engineer" and the ceiling never
+    got a look. 16 such roles were on the board, two of them above everything
+    else (RC1-589). Same reason leadershipOverrideTitles already pre-checks
+    Manager-of-a-team titles.
+
+    Two carve-outs, both taken from live titles:
+
+      - "Chief of Staff" names the team, not the rank ("Lead Technical Program
+        Manager - Chief of Staff Services", 77%).
+      - At financial firms the rank is a seniority BAND appended to an IC title:
+        "XPG Technical Program Manager - Vice President" (Morgan Stanley),
+        "Kinexys Program Manager - Vice President" (JPMorgan), and a BlackRock
+        "Technical Project Manager - Strategic Initiatives Office, Vice
+        President" that the user saved himself. A rank that TRAILS a target
+        title is a suffix, not an office.
+
+    Position, not punctuation, decides the suffix: _title_text() reads hyphens as
+    spaces, so "Manager - Vice President" has no separator left to test by the
+    time this runs. The target title must match as a whole word, which is what
+    separates "Strategic Solutions Engineering Director" (a real director seat --
+    "engineering" is not the word "engineer") from the bank titles above."""
+    ceiling = sorted((_title_text(c) for c in _ceiling_titles(profile)), key=len, reverse=True)
+    if not ceiling:
+        return None
+    ic = _ic_target_titles(profile)
+    for term in ceiling:
+        for m in re.finditer(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", t):
+            if term == "chief" and t[m.end():].lstrip(" ,-").startswith("of staff"):
+                continue
+            head, tail = t[:m.start()], t[m.end():]
+            if not tail.strip(" ,.-()") and any(
+                    re.search(r"(?<![a-z])" + re.escape(x) + r"(?![a-z])", head) for x in ic):
+                continue          # rank trails an IC title: a band, not an office
+            return term
+    return None
+
+
 def title_decision(title, profile):
     t = _title_text(title)
     matching = profile.get("matching", {})
+    hit = _seniority_ceiling_hit(t, profile)
+    if hit:
+        return False, "titleMismatch: Seniority too high (people-leadership)"
     # People-leadership overrides beat the always-include list: "Senior Manager,
     # Sales Engineering" contains "sales engineer", and skip rules only run
     # after always-include (whose seniority tier also starts at Director), so
@@ -940,16 +1041,16 @@ def location_ok(role, profile):
     # Only an explicit arrangement in remoteNotes can still rule one out.
     if US_NATIONWIDE_ONLY_RE.match((role.get("location") or "").strip().lower()):
         notes = (role.get("remoteNotes") or "").lower()
-        if not re.search(r"hybrid|on-?site|in-office", notes):
+        if not ARRANGEMENT_RE.search(notes):
             return True, None
 
     is_remote = "remote" in text
     if is_remote:
         # remote but tied to a non-US / non-metro geography that requires presence
-        if re.search(r"hybrid|on-?site|in-office", text) and not any(m in text for m in metro):
+        if ARRANGEMENT_RE.search(text) and not any(m in text for m in metro):
             return False, "locationHybrid: hybrid/onsite outside NYC metro"
         return True, None                  # treat remote (incl. remote-US) as include
-    if re.search(r"hybrid|on-?site|in-office", text):
+    if ARRANGEMENT_RE.search(text):
         return False, "locationHybrid: hybrid/onsite outside NYC metro"
     return True, None                      # unknown -> inclusive default
 
@@ -1677,6 +1778,15 @@ def apply_content_change(ex, inc):
     for k in ("title", "location", "salaryMin", "salaryMax"):
         if inc.get(k):
             ex[k] = inc[k].strip() if isinstance(inc[k], str) else inc[k]
+    if inc.get("location") and inc.get("remoteStatus"):
+        # The stored remoteStatus was DERIVED from the location just replaced, so
+        # keeping it strands a contradiction on the role. SingleStore's req ended
+        # up with location "United States (Remote)" and a remoteStatus of
+        # "onsite" derived from a bare "United States" two months earlier, and
+        # read as onsite everywhere (RC1-588 made the filter resilient to it;
+        # this is the cause). The incoming row's status came off the location we
+        # are adopting, so it is the one that matches.
+        ex["remoteStatus"] = inc["remoteStatus"]
     if desc_changed:
         ex["fullDescription"] = new_desc
     ex["changedDate"] = TODAY
@@ -2077,6 +2187,108 @@ def resolve_ats(dry_run=False, allow_guess=True, limit=None, min_gain=200):
     return 0
 
 
+# ------------------------------------------------------- liveness re-verification
+VERIFY_STALE_DAYS = 30            # only re-check roles that have sat this long
+VERIFY_BOARD_LIMIT = 40           # distinct ATS boards fetched per run (bounds HTTP)
+
+
+def verify_open(dry_run=False, stale_days=VERIFY_STALE_DAYS, board_limit=VERIFY_BOARD_LIMIT):
+    """Re-verify that long-open roles are still posted, for companies the daily
+    sweep never checks.
+
+    `mark_closed_listings` only diffs roles that carry an `atsUrl` AND sit at a
+    successfully-fetched WATCHLIST company, so a role discovered at any other
+    company is never looked at again. On 2026-11-02 that was 695 undecided open
+    roles older than 30 days -- 45% of the board -- 560 of them at non-watchlist
+    companies, several in the top ten by score (RC1-589).
+
+    375 of those do carry a parseable ATS url, so the company's board can be
+    fetched on demand from the url itself (`_parse_ats_url`) and diffed with the
+    same rules. Roles with no `atsUrl` at all are out of reach here; `--resolve-ats`
+    is the step that gives them one.
+
+    Reuses mark_closed_listings rather than re-implementing the diff, so the two
+    guards that matter are shared: a role counts as alive if EITHER its url or its
+    company+title slug is on the board (RC1-588 -- a reposted req gets a NEW ATS
+    id, so SingleStore's stored url 404s while the posting is live, and a direct
+    url probe would have wrongly retired it), and a company whose fetch fails is
+    never diffed at all. Decided roles are skipped: a closed flag on a role the
+    user has acted on tells them nothing they want.
+
+    Network-bound. Run on a machine with ATS access, not the sandbox."""
+    profile = load_json(DATA / "profile.json", {})
+    jobs = load_json(DATA / "jobs.json", {"schemaVersion": 2, "roles": [], "meta": {}})
+    state = load_json(DATA / "state.json", {"jobs": {}})
+    decided = decided_ids(state)
+    roles = jobs.get("roles", [])
+
+    cutoff = (datetime.date.fromisoformat(TODAY) - datetime.timedelta(days=stale_days)).isoformat()
+    stale, no_ats = [], 0
+    for r in roles:
+        if r.get("closed") or r.get("id") in decided:
+            continue
+        found = r.get("foundDate") or ""
+        if not found or found > cutoff:
+            continue
+        if not _parse_ats_url(r.get("atsUrl") or ""):
+            no_ats += 1
+            continue
+        stale.append(r)
+
+    # Group by the board each role lives on, so a company is fetched once however
+    # many of its roles are stale. Boards with the most stale roles go first, so a
+    # capped run still clears the largest blocks.
+    by_board = {}
+    for r in stale:
+        by_board.setdefault(_parse_ats_url(r["atsUrl"]), []).append(r)
+    order = sorted(by_board, key=lambda k: -len(by_board[k]))
+    picked, deferred = order[:board_limit], order[board_limit:]
+
+    print(f"Verify-open: {len(stale)} role(s) idle >{stale_days}d across {len(order)} board(s); "
+          f"fetching {len(picked)}, deferring {len(deferred)}. "
+          f"{no_ats} role(s) have no resolvable ATS url (use --resolve-ats).")
+
+    live_boards, failed = {}, []
+    for key in picked:
+        ats, slug = key
+        fetcher = ATS_FETCHERS.get(ats)
+        if not fetcher:
+            failed.append((key, "no fetcher"))
+            continue
+        try:
+            postings = fetcher(slug)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as e:
+            failed.append((key, str(e)))
+            continue
+        # One board can serve roles stored under several company spellings, so key
+        # the diff by each stale role's own company string.
+        for r in by_board[key]:
+            company = r.get("company") or ""
+            board = live_boards.setdefault(company, {"urls": set(), "ids": set()})
+            for raw in postings:
+                board["urls"].add((raw.get("url") or "").rstrip("/"))
+                board["ids"].add(slugify(company, raw.get("title") or ""))
+
+    checked = [r for key in picked for r in by_board[key]]
+    closed, reopened = mark_closed_listings(checked, live_boards)
+    for r in checked:
+        if r.get("closedDate") == TODAY:
+            print(f"  closed  {r.get('matchPercent')}%  {r.get('company')} — {r.get('title')}")
+    if failed:
+        print(f"  {len(failed)} board fetch(es) failed, their roles left untouched: "
+              + ", ".join(f"{k[0]}/{k[1]}" for k, _ in failed[:6])
+              + (" …" if len(failed) > 6 else ""))
+    if dry_run:
+        print("  --dry-run: no files written.")
+        return 0
+    if closed or reopened:
+        jobs.setdefault("meta", {})["lastVerifyOpen"] = TODAY
+        with open(DATA / "jobs.json", "w") as f:
+            json.dump(jobs, f, indent=2, ensure_ascii=False)
+        print(f"  wrote jobs.json ({len(roles)} roles).")
+    return 0
+
+
 def refilter(dry_run=False):
     """Re-apply the current filter cascade + scoring to the EXISTING board.
 
@@ -2454,6 +2666,16 @@ def main():
                     help="ONLY recompute matchPercent for every existing role against the "
                          "current scoring; no cascade, no archiving, no discovery. Run after "
                          "a scoring change to land it on the whole board.")
+    ap.add_argument("--verify-open", action="store_true",
+                    help="ONLY re-verify that long-idle roles are still posted, by fetching "
+                         "each one's own ATS board (not just watchlist companies) and marking "
+                         "the ones that have vanished closed. No discovery.")
+    ap.add_argument("--stale-days", type=int, default=VERIFY_STALE_DAYS,
+                    help=f"with --verify-open: only check roles idle this long "
+                         f"(default {VERIFY_STALE_DAYS})")
+    ap.add_argument("--board-limit", type=int, default=VERIFY_BOARD_LIMIT,
+                    help=f"with --verify-open: max distinct ATS boards to fetch "
+                         f"(default {VERIFY_BOARD_LIMIT})")
     args = ap.parse_args()
 
     # Snapshot the source-of-truth files before mutating anything (no-op on --dry-run).
@@ -2467,6 +2689,11 @@ def main():
     # --rescore: recompute scores for the existing board only, no cascade/archiving.
     if args.rescore:
         sys.exit(rescore(dry_run=args.dry_run))
+
+    # --verify-open: liveness re-check for long-idle roles, no discovery.
+    if args.verify_open:
+        sys.exit(verify_open(dry_run=args.dry_run, stale_days=args.stale_days,
+                             board_limit=args.board_limit))
 
     # --reenrich: enrich-only, no discovery.
     if args.reenrich:

@@ -86,6 +86,9 @@ tests/     stdlib unittest, 20 files, offline (ATS calls mocked)
 python3 scripts/pipeline.py                # full run: sweep + re-enrich
 python3 scripts/pipeline.py --dry-run      # preview, writes nothing
 python3 scripts/pipeline.py --sweep-only   # discovery sweep only
+python3 scripts/pipeline.py --refilter     # re-apply the cascade to the board
+python3 scripts/pipeline.py --rescore      # land a scoring change on the board
+python3 scripts/pipeline.py --verify-open  # re-check long-idle roles are still posted
 python3 scripts/serve.py                   # the board, 127.0.0.1:8000
 python3 scripts/skill_match.py --list-pending
 python3 -m unittest discover -s tests
