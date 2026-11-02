@@ -27,6 +27,8 @@ data/jobs.json
 data/archive.json
 # per-run audit log:
 data/search-log.json
+# self-tuning proposals: names the roles you hid and why (personal data):
+data/tuning-log.json
 # rendered on the fly by scripts/serve.py:
 data/board.html
 # your resume(s):

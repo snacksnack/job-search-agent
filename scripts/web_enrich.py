@@ -21,7 +21,10 @@ browsing itself:
                    [postedDate]}. Rescoring uses pipeline.score; when a description
                    materially grows, the cached skillMatch is flagged stale (RC1-297:
                    a real assessment is kept, never deleted) so the next Cowork run
-                   re-assesses it on the full text.
+                   re-assesses it on the full text. The full text is also the first
+                   text profile.matching.descriptionSkips can honestly be judged on,
+                   so the description cascade re-runs here and a role that now trips
+                   a skip is archived (RC1-586) -- never one the user has decided on.
 
 Stdlib only. Python 3.11+.
 """
@@ -35,7 +38,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pipeline import score, make_rationale, flag_stale_assessment  # reuse the deterministic scorer
+from pipeline import (  # reuse the deterministic scorer + cascade
+    archive_evicted,
+    decided_ids,
+    description_recheck,
+    flag_stale_assessment,
+    make_rationale,
+    score,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -128,8 +138,15 @@ def apply_enrichments(path):
     with open(DATA / "profile.json") as f:
         profile = json.load(f)
     jobs = load_jobs()
+    state_path = DATA / "state.json"
+    state = json.loads(state_path.read_text()) if state_path.exists() else {"jobs": {}}
+    decided = decided_ids(state)
+    started = datetime.datetime.now().isoformat(timespec="seconds")
     index = {r.get("id"): r for r in jobs.get("roles", [])}
     updated, recleared, unknown, skipped = 0, 0, [], 0
+    # pipeline.archive_evicted writes archive.json + the rejects log under
+    # pipeline.DATA, which is the same data/ dir this module resolves.
+    evicted = []
 
     for rid, e in by_id.items():
         role = index.get(rid)
@@ -157,9 +174,15 @@ def apply_enrichments(path):
         if flag_stale_assessment(role):
             recleared += 1
         updated += 1
+        # The browser-read JD is the first text a descriptionSkip can honestly be
+        # judged on; run()'s cascade saw only the thin snippet (RC1-586).
+        reason = description_recheck(role, profile, decided)
+        if reason:
+            evicted.append((role, reason))
 
+    archive_evicted(jobs, evicted, started)
     atomic_write_json(JOBS_PATH, jobs)
-    return updated, recleared, skipped, unknown
+    return updated, recleared, skipped, unknown, evicted
 
 
 def main():
@@ -187,10 +210,12 @@ def main():
         return 0
 
     if args.apply:
-        updated, recleared, skipped, unknown = apply_enrichments(args.apply)
+        updated, recleared, skipped, unknown, evicted = apply_enrichments(args.apply)
         print(f"Applied {updated} enrichment(s); skipped {skipped} (no material gain).")
         if recleared:
             print(f"  Flagged {recleared} role(s) for re-assessment on the fuller JD.")
+        for role, reason in evicted:
+            print(f"  archived on full JD: {role.get('company')} — {role.get('title')} ({reason})")
         if unknown:
             print(f"  {len(unknown)} unknown id(s): {', '.join(unknown[:8])}"
                   + (" …" if len(unknown) > 8 else ""), file=sys.stderr)

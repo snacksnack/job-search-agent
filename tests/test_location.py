@@ -59,6 +59,37 @@ class LocationTests(unittest.TestCase):
             self.assertTrue(ok)
             self.assertIsNone(reason)
 
+    def test_nationwide_only_location_not_read_as_onsite(self):
+        """RC1-586: LinkedIn renders a US-remote posting as a bare "United States"
+        when its Remote filter established remoteness and there is no city. The
+        cascade found no "remote" token, fell through to normalize()'s derived
+        remoteStatus of "onsite", and rejected the role as locationHybrid --
+        silently dropping 10 qualifying roles on 2026-10-31, Docker's Principal
+        TPM, Forward Deployed Engineering (81%) among them."""
+        for loc in ["United States", "united states", "US", "U.S.", "USA",
+                    "United States of America", "Nationwide"]:
+            ok, reason = pipeline.location_ok(
+                {"location": loc, "remoteStatus": "onsite", "remoteNotes": ""}, self.p)
+            self.assertTrue(ok, f"expected include for {loc!r} (got {reason})")
+
+    def test_nationwide_only_with_explicit_onsite_note_still_excluded(self):
+        """The scope string alone can't rule a role out, but an explicit
+        arrangement in remoteNotes still does."""
+        ok, reason = pipeline.location_ok(
+            {"location": "United States", "remoteStatus": "onsite",
+             "remoteNotes": "Hybrid, 3 days a week in our Austin office"}, self.p)
+        self.assertFalse(ok)
+        self.assertIn("locationHybrid", reason)
+
+    def test_country_qualified_city_still_judged_on_the_city(self):
+        """Only a location that is *nothing but* a nationwide scope gets the pass:
+        "Milpitas, California, United States" is still an onsite posting."""
+        ok, reason = pipeline.location_ok(
+            {"location": "Milpitas, California, United States", "remoteStatus": "onsite",
+             "remoteNotes": ""}, self.p)
+        self.assertFalse(ok)
+        self.assertIn("locationHybrid", reason)
+
     def _ok_role(self, title, location, remote_status="remote"):
         return pipeline.location_ok(
             {"title": title, "location": location,
@@ -121,6 +152,29 @@ class LocationTests(unittest.TestCase):
         for loc in ["Remote - USA (Remote)", "New York, NY", "United States", "US",
                     "Ontario - Remote", "Remote - Maine, USA"]:
             self.assertFalse(pipeline._location_names_no_geography(loc), repr(loc))
+
+class NormalizeRemoteStatusTests(unittest.TestCase):
+    """normalize() derives remoteStatus from the location string when a source
+    doesn't supply one. A country name is an eligibility scope, not a worksite."""
+
+    def test_nationwide_only_location_is_unknown_not_onsite(self):
+        for loc in ["United States", "USA", "Nationwide"]:
+            role = pipeline.normalize({"title": "TPM", "company": "X", "location": loc},
+                                      "linkedinKeyword")
+            self.assertEqual(role["remoteStatus"], "unknown", loc)
+
+    def test_city_location_is_still_onsite(self):
+        role = pipeline.normalize({"title": "TPM", "company": "X", "location": "Milpitas, CA"},
+                                  "linkedinKeyword")
+        self.assertEqual(role["remoteStatus"], "onsite")
+
+    def test_explicit_tokens_still_win(self):
+        for loc, expected in [("Remote - United States", "remote"),
+                              ("United States (Hybrid)", "hybrid"),
+                              ("", "unknown")]:
+            role = pipeline.normalize({"title": "TPM", "company": "X", "location": loc},
+                                      "linkedinKeyword")
+            self.assertEqual(role["remoteStatus"], expected, loc)
 
 
 if __name__ == "__main__":

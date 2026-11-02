@@ -132,6 +132,18 @@ NON_US_RE = re.compile(
     r")(?![a-z])"
 )
 
+# A location that names ONLY a US-wide scope -- no city, no state, no arrangement.
+# LinkedIn renders exactly this ("United States") when a Remote filter already
+# established remoteness and there is no city to show, and Greenhouse boards use
+# it for nationwide reqs. It is an eligibility statement, not a worksite, so it
+# must not be read as "onsite" (RC1-586).
+US_NATIONWIDE_ONLY_RE = re.compile(
+    r"^(?:"
+    r"u\.?s\.?|u\.?s\.?a\.?|usa|united states(?: of america)?|"
+    r"nationwide|anywhere in the (?:u\.?s\.?|united states)"
+    r")$"
+)
+
 # Words that describe an ARRANGEMENT, not a place. Stripping them is how we tell a
 # location field that names no geography ("Remote", "Remote (Remote)", "") from one
 # that does ("Remote - USA", "New York, NY") -- see _location_names_no_geography.
@@ -855,6 +867,7 @@ def location_ok(role, profile):
     lr = profile.get("preferences", {}).get("locationRule", {})
     text = f"{role.get('location','')} {role.get('remoteStatus','')} {role.get('remoteNotes','')}".lower()
     metro = [m.lower() for m in lr.get("metroIncludeAnyArrangement", [])]
+    us_scope = lr.get("includeRemoteScope", "US").upper() == "US"
     if NY_METRO_RE.search(text) or any(m in text for m in metro):
         return True, None                  # NYC metro, any arrangement
 
@@ -867,16 +880,25 @@ def location_ok(role, profile):
     # Engineer, Enterprise - LATAM" is a New York, NY seat and BigPanda's "Sales
     # Engineer, LATAM" is Remote - USA. Reading the title unconditionally would
     # have rejected both, so it is consulted only as a fallback (RC1-587).
-    if lr.get("includeRemoteScope", "US").upper() == "US" and \
-            _location_names_no_geography(role.get("location")):
+    if us_scope and _location_names_no_geography(role.get("location")):
         title = (role.get("title") or "").lower()
         if NON_US_RE.search(title) and not US_RE.search(title):
             return False, "locationNonUS: title names a non-US region, location silent"
 
     # Enforce US remote scope: a foreign location with no US signal is out of scope.
-    if lr.get("includeRemoteScope", "US").upper() == "US":
-        if NON_US_RE.search(text) and not US_RE.search(text):
-            return False, "locationNonUS: outside US remote scope"
+    if us_scope and NON_US_RE.search(text) and not US_RE.search(text):
+        return False, "locationNonUS: outside US remote scope"
+
+    # A nationwide-only location ("United States") carries no worksite, so the
+    # onsite/hybrid test below has nothing legitimate to match -- it was firing on
+    # the "onsite" that normalize() derives from the bare country and rejecting
+    # genuinely US-remote roles as locationHybrid (RC1-586, 10 roles lost on
+    # 2026-10-31 including Docker's Principal TPM, Forward Deployed Engineering).
+    # Only an explicit arrangement in remoteNotes can still rule one out.
+    if US_NATIONWIDE_ONLY_RE.match((role.get("location") or "").strip().lower()):
+        notes = (role.get("remoteNotes") or "").lower()
+        if not re.search(r"hybrid|on-?site|in-office", notes):
+            return True, None
 
     is_remote = "remote" in text
     if is_remote:
@@ -1055,6 +1077,12 @@ def normalize(raw, source):
             remote_status = "remote"
         elif re.search(r"hybrid", lt):
             remote_status = "hybrid"
+        elif US_NATIONWIDE_ONLY_RE.match(lt.strip()):
+            # "United States" is the hiring scope, not a worksite: deriving
+            # "onsite" from it both mislabels the role on the board and used to
+            # get it rejected as locationHybrid (RC1-586). We can't prove it is
+            # remote from the string alone, so say so.
+            remote_status = "unknown"
         elif loc:
             remote_status = "onsite"
         else:
@@ -1416,6 +1444,61 @@ def write_rejects_log(rejects, keep_days=REJECTS_KEEP_DAYS):
     print(f"Rejects log: {len(rejects)} rejected posting(s) -> data/logs/{path.name}")
 
 
+# ------------------------------------------------- post-enrichment re-checking
+def decided_ids(state):
+    """Every role id the user has acted on, so no pass can evict one.
+
+    A decision lives in state["jobs"][id] or, for some applied roles, as a
+    top-level id key carrying a status. Either one is the user's."""
+    ids = set(state.get("jobs", {}).keys())
+    ids |= {k for k, v in state.items()
+            if k not in ("schemaVersion", "jobs") and isinstance(v, dict) and "status" in v}
+    return ids
+
+
+def description_recheck(role, profile, decided):
+    """Re-apply the description cascade to a role whose JD was just upgraded.
+
+    run()'s cascade can only judge a posting on the text its discovering source
+    carried. A LinkedIn find arrives title-only, so description_ok() has nothing
+    to fire on and a quota-carrying role lands on the board: Grafana Labs
+    "Solutions Engineer | East Coast | Remote" (explicit OTE) was rejected from
+    the Greenhouse sweep and accepted from its own thin LinkedIn copy in the same
+    run (2026-10-31). The check has to run again at the one moment the canonical
+    text arrives -- --reenrich and web_enrich --apply -- or a descriptionSkip is
+    simply a function of which source happened to find the req first (RC1-586).
+
+    Returns the rejection reason, or None to keep. A role the user has decided on
+    or saved is never evicted, the same rule refilter() honors."""
+    if role.get("id") in decided or role.get("userSaved"):
+        return None
+    ok, reason = description_ok(role, profile)
+    return None if ok else reason
+
+
+def archive_evicted(jobs, evicted, started):
+    """Move roles off the board into archive.json and the day's rejects log.
+
+    `evicted` is a list of (role, reason). Mirrors refilter()'s archive contract:
+    the full record is kept -- including any cached skillMatch, since an
+    assessment is never deleted -- and every eviction is explainable from the
+    rejects log. Mutates jobs["roles"]; the caller still owns writing jobs.json."""
+    if not evicted:
+        return
+    ids = {r.get("id") for r, _ in evicted}
+    for role, reason in evicted:
+        role["archivedReason"] = reason
+        role["archivedDate"] = TODAY
+    jobs["roles"] = [r for r in jobs.get("roles", []) if r.get("id") not in ids]
+    archive = load_json(DATA / "archive.json", {"schemaVersion": 1, "roles": [], "meta": {}})
+    archive["roles"] = archive.get("roles", []) + [r for r, _ in evicted]
+    archive.setdefault("meta", {})
+    archive["meta"].update(lastArchive=started, count=len(archive["roles"]))
+    with open(DATA / "archive.json", "w") as f:
+        json.dump(archive, f, indent=2, ensure_ascii=False)
+    write_rejects_log([reject_record(r, reason, started) for r, reason in evicted])
+
+
 # ------------------------------------------------------------- date integrity
 def found_date_warnings(new_roles, all_roles, ignored_found_dates=(), today=None):
     """RC1-311: tripwires for a `foundDate` that didn't come off the system clock.
@@ -1679,6 +1762,11 @@ def reenrich(dry_run=False, min_gain=200):
     the deterministic score and, when a description materially changes, flags any
     cached `skillMatch` as stale so the next run re-assesses it on the fuller text.
 
+    The canonical text is also the first text a descriptionSkip can honestly be
+    judged on -- a LinkedIn find arrives title-only -- so the description cascade
+    re-runs on every upgrade and a role that now trips a skip is archived
+    (RC1-586). Roles the user has decided on or saved are never evicted.
+
     Only touches roles with an enrichable ATS url (see ENRICHABLE_HOSTS). For
     SmartRecruiters this is the step that fills the full JD the watchlist sweep
     intentionally skips. LinkedIn/source-only roles can't be enriched this way and
@@ -1687,6 +1775,9 @@ def reenrich(dry_run=False, min_gain=200):
     profile = load_json(DATA / "profile.json", {})
     jobs = load_json(DATA / "jobs.json", {"schemaVersion": 2, "roles": [], "meta": {}})
     roles = jobs.get("roles", [])
+    decided = decided_ids(load_json(DATA / "state.json", {"jobs": {}}))
+    started = datetime.datetime.now().isoformat(timespec="seconds")
+    evicted = []
 
     updated = recleared = no_ats = not_found = unchanged = skipped_closed = 0
     for role in roles:
@@ -1740,16 +1831,25 @@ def reenrich(dry_run=False, min_gain=200):
         if flag_stale_assessment(role):
             recleared += 1
         updated += 1
+        # The canonical JD is the first text a descriptionSkip can honestly be
+        # judged on (RC1-586).
+        reason = description_recheck(role, profile, decided)
+        if reason:
+            evicted.append((role, reason))
 
     print(f"Re-enrich: {updated} updated, {unchanged} already-full, "
           f"{not_found} not found on ATS, {no_ats} have no ATS url, "
           f"{skipped_closed} closed (skipped).")
     if recleared:
         print(f"  Flagged {recleared} role(s) for re-assessment on the fuller JD.")
+    for role, reason in evicted:
+        print(f"  archived on full JD: {role.get('company')} — {role.get('title')} ({reason})")
     if dry_run:
         print("(dry run: nothing written)")
         return 0
+    archive_evicted(jobs, evicted, started)
     if updated or unchanged:
+        roles = jobs.get("roles", [])
         jobs.setdefault("meta", {})["totalRoles"] = len(roles)
         with open(DATA / "jobs.json", "w") as f:
             json.dump(jobs, f, indent=2, ensure_ascii=False)
@@ -1956,11 +2056,7 @@ def refilter(dry_run=False):
     archive = load_json(DATA / "archive.json", {"schemaVersion": 1, "roles": [], "meta": {}})
     roles = jobs.get("roles", [])
 
-    # A decision lives in state["jobs"][id] or, for some applied roles, as a
-    # top-level id key carrying a status. Treat either as the user's -> protected.
-    decided = set(state.get("jobs", {}).keys())
-    decided |= {k for k, v in state.items()
-                if k not in ("schemaVersion", "jobs") and isinstance(v, dict) and "status" in v}
+    decided = decided_ids(state)      # the user's decisions -> never archived
 
     kept, archived, rejects = [], [], []
     started = datetime.datetime.now().isoformat(timespec="seconds")
