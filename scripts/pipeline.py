@@ -105,15 +105,37 @@ NY_METRO_RE = re.compile(
 US_RE = re.compile(r"(?<![a-z])(u\.?s\.?a?|united states|north america|americas|stateside)(?![a-z])")
 NON_US_RE = re.compile(
     r"(?<![a-z])("
-    r"netherlands|united kingdom|uk|england|scotland|wales|ireland|"
+    # "england" must not match inside "New England" -- it would reject US roles
+    # like Zscaler's "Senior Sales Engineer - Majors, New England" (RC1-587).
+    r"netherlands|united kingdom|uk|(?<!new )england|scotland|wales|ireland|"
     r"germany|france|spain|portugal|italy|poland|sweden|norway|denmark|finland|"
     r"switzerland|austria|belgium|netherland|greece|romania|czech|hungary|"
     r"europe|emea|apac|latam|india|canada|australia|new zealand|singapore|"
     r"japan|china|hong kong|brazil|mexico|argentina|colombia|israel|uae|"
     r"london|dublin|berlin|munich|paris|madrid|barcelona|amsterdam|"
-    r"toronto|vancouver|bangalore|bengaluru|hyderabad|pune|sydney|melbourne|tokyo"
+    r"toronto|vancouver|bangalore|bengaluru|hyderabad|pune|sydney|melbourne|tokyo|"
+    # Canadian provinces: a posting often names only the province ("Ontario -
+    # Remote"), which passed the US-remote scope check because just the cities
+    # and "canada" were listed -- OpenAI's "Support Delivery Lead - Toronto"
+    # reached the board that way (RC1-587). "ontario" is guarded because Ontario,
+    # California is a real US city; the others have no US collision.
+    #
+    # Deliberately provinces only, no more cities. US_RE recognizes country and
+    # region words, not US cities, so a dual-site posting trips the non-US rule
+    # on its foreign city while its US city goes unseen: adding "calgary" turned
+    # CoolIT's "Remote (San Francisco or Calgary)" TPM into a locationNonUS
+    # rejection. The asymmetry already exists for toronto/vancouver; widening it
+    # needs US_RE to learn US cities, which is a different change.
+    r"ontario(?!,? ?(?:ca|california|or|oregon)(?![a-z]))|"
+    r"quebec|british columbia|alberta|manitoba|saskatchewan|nova scotia|"
+    r"newfoundland"
     r")(?![a-z])"
 )
+
+# Words that describe an ARRANGEMENT, not a place. Stripping them is how we tell a
+# location field that names no geography ("Remote", "Remote (Remote)", "") from one
+# that does ("Remote - USA", "New York, NY") -- see _location_names_no_geography.
+_ARRANGEMENT_RE = re.compile(r"(?<![a-z])(remote|hybrid|on-?site|in-office|anywhere)(?![a-z])")
 
 
 # --------------------------------------------------------------------------- IO
@@ -818,12 +840,38 @@ def salary_ok(role, profile):
     return True, None
 
 
+def _location_names_no_geography(location):
+    """True when the location field names no place at all once arrangement words
+    and punctuation are stripped: "", "Remote", "Remote (Remote)".
+
+    This is the only case where the TITLE is the better location signal. Any
+    location that names a city, state or country -- including an explicit US one
+    -- outranks the title (RC1-587)."""
+    t = re.sub(r"[^a-z ]+", " ", (location or "").lower())
+    return not _ARRANGEMENT_RE.sub(" ", t).split()
+
+
 def location_ok(role, profile):
     lr = profile.get("preferences", {}).get("locationRule", {})
     text = f"{role.get('location','')} {role.get('remoteStatus','')} {role.get('remoteNotes','')}".lower()
     metro = [m.lower() for m in lr.get("metroIncludeAnyArrangement", [])]
     if NY_METRO_RE.search(text) or any(m in text for m in metro):
         return True, None                  # NYC metro, any arrangement
+
+    # Territory vs worksite. A non-US token in the TITLE is a location signal only
+    # when the location field has nothing to say: "Senior Sales Engineer - UK" at
+    # "Remote" is a UK seat, and it reached the board three times (10-25, 10-30,
+    # 10-31) because "Remote" alone satisfies the US-remote rule. But the same
+    # token in a title whose location names a real place is the book of accounts
+    # the seat covers, not where it sits -- Atlassian's "Senior Solutions
+    # Engineer, Enterprise - LATAM" is a New York, NY seat and BigPanda's "Sales
+    # Engineer, LATAM" is Remote - USA. Reading the title unconditionally would
+    # have rejected both, so it is consulted only as a fallback (RC1-587).
+    if lr.get("includeRemoteScope", "US").upper() == "US" and \
+            _location_names_no_geography(role.get("location")):
+        title = (role.get("title") or "").lower()
+        if NON_US_RE.search(title) and not US_RE.search(title):
+            return False, "locationNonUS: title names a non-US region, location silent"
 
     # Enforce US remote scope: a foreign location with no US signal is out of scope.
     if lr.get("includeRemoteScope", "US").upper() == "US":
