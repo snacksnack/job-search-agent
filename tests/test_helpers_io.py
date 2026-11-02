@@ -89,7 +89,7 @@ class WebEnrichIoTests(unittest.TestCase):
         f = Path(self._tmp.name) / "enr.json"
         f.write_text(json.dumps([{"id": "a", "fullDescription": long_desc,
                                   "salaryMin": 170000, "salaryMax": 210000, "location": "Remote - US"}]))
-        updated, recleared, skipped, unknown = web_enrich.apply_enrichments(str(f))
+        updated, recleared, skipped, unknown, evicted = web_enrich.apply_enrichments(str(f))
         self.assertEqual(updated, 1)
         self.assertEqual(recleared, 1)
         role = next(r for r in json.loads((web_enrich.JOBS_PATH).read_text())["roles"] if r["id"] == "a")
@@ -101,7 +101,7 @@ class WebEnrichIoTests(unittest.TestCase):
     def test_apply_idempotent_skips_no_gain(self):
         f = Path(self._tmp.name) / "enr.json"
         f.write_text(json.dumps([{"id": "a", "fullDescription": "tiny"}]))  # no material gain
-        updated, recleared, skipped, unknown = web_enrich.apply_enrichments(str(f))
+        updated, recleared, skipped, unknown, evicted = web_enrich.apply_enrichments(str(f))
         self.assertEqual(updated, 0)
         self.assertEqual(skipped, 1)
 
