@@ -90,6 +90,68 @@ class LocationTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("locationHybrid", reason)
 
+    def _ok_role(self, title, location, remote_status="remote"):
+        return pipeline.location_ok(
+            {"title": title, "location": location,
+             "remoteStatus": remote_status, "remoteNotes": ""}, self.p)
+
+    def test_title_region_excluded_when_location_says_nothing(self):
+        """RC1-587: "Senior Sales Engineer - UK" at location "Remote" satisfies the
+        US-remote rule on the location field alone and reached the board three
+        times (10-25, 10-30, 10-31). When the location names no place, the title
+        is the only location signal there is."""
+        for title, loc in [("Senior Sales Engineer - UK", "Remote"),
+                           ("Solutions Architect, EMEA", "Remote (Remote)"),
+                           ("Technical Program Manager, APAC", ""),
+                           ("Delivery Lead - Germany", "Remote")]:
+            ok, reason = self._ok_role(title, loc)
+            self.assertFalse(ok, f"expected exclude for {title!r} @ {loc!r}")
+            self.assertIn("locationNonUS", reason)
+
+    def test_title_region_is_a_territory_when_the_location_names_a_place(self):
+        """The same token in a title whose location names a real place is the book
+        of accounts the seat covers, not where it sits. Reading the title
+        unconditionally would have rejected all of these."""
+        for title, loc in [
+            ("Senior Solutions Engineer, Enterprise - LATAM", "New York, NY"),
+            ("Forward Deployed, Asset Management (EMEA)", "New York City"),
+            ("Sales Engineer, LATAM", "Remote - USA (Remote)"),
+            ("Solutions Engineer, EMEA", "Austin, TX"),
+        ]:
+            ok, reason = self._ok_role(title, loc)
+            self.assertTrue(ok, f"expected include for {title!r} @ {loc!r} ({reason})")
+
+    def test_title_naming_both_us_and_foreign_regions_kept(self):
+        self.assertTrue(self._ok_role("Solutions Engineer, US & EMEA", "Remote")[0])
+
+    def test_new_england_is_not_england(self):
+        """"england" matched inside "New England", which would have rejected
+        Zscaler's "Senior Sales Engineer - Majors, New England" (RC1-587)."""
+        self.assertIsNone(pipeline.NON_US_RE.search("new england"))
+        self.assertIsNotNone(pipeline.NON_US_RE.search("london, england uk"))
+        self.assertTrue(self._ok_role("Senior Sales Engineer - Majors, New England",
+                                      "Remote - Maine, USA; Remote - Vermont, USA")[0])
+
+    def test_canadian_provinces_are_out_of_scope(self):
+        """A posting often names only the province: "Ontario - Remote" passed
+        because just the cities and "canada" were listed (RC1-587)."""
+        for loc in ["Ontario - Remote", "Remote - Quebec", "British Columbia",
+                    "Alberta, Canada", "Nova Scotia"]:
+            ok, reason = self._ok_role("Technical Program Manager", loc)
+            self.assertFalse(ok, f"expected exclude for {loc!r}")
+            self.assertIn("locationNonUS", reason)
+
+    def test_ontario_california_is_not_canada(self):
+        for loc in ["Ontario, CA", "Ontario, California", "Ontario, OR"]:
+            self.assertIsNone(pipeline.NON_US_RE.search(loc.lower()),
+                              f"{loc!r} wrongly matched non-US")
+
+    def test_location_names_no_geography(self):
+        for loc in ["", "Remote", "Remote (Remote)", "remote - remote", "Anywhere"]:
+            self.assertTrue(pipeline._location_names_no_geography(loc), repr(loc))
+        for loc in ["Remote - USA (Remote)", "New York, NY", "United States", "US",
+                    "Ontario - Remote", "Remote - Maine, USA"]:
+            self.assertFalse(pipeline._location_names_no_geography(loc), repr(loc))
 
 class NormalizeRemoteStatusTests(unittest.TestCase):
     """normalize() derives remoteStatus from the location string when a source
