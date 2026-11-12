@@ -70,5 +70,17 @@ class SearchBehaviorTests(unittest.TestCase):
                          "matchesSearch disagreed with fixtures:\n" + proc.stderr)
 
 
+class SalaryLabelTests(unittest.TestCase):
+    """RC1-649: an Adzuna estimate is labeled as one, never shown as a posted range."""
+
+    def test_estimate_labeled(self):
+        self.assertEqual(render.salary_str({"salaryEstimate": 144856}),
+                         "~$144K (Adzuna estimate)")
+
+    def test_posted_range_wins_over_estimate(self):
+        self.assertTrue(render.salary_str(
+            {"salaryMin": 150000, "salaryMax": 190000, "salaryEstimate": 144856}).startswith("$150K"))
+
+
 if __name__ == "__main__":
     unittest.main()

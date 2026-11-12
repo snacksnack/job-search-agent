@@ -798,21 +798,30 @@ def fetch_agg_adzuna(params):
         data = http_get_json(f"https://api.adzuna.com/v1/api/jobs/us/search/{page}?{q}")
         results = data.get("results", []) or []
         for j in results:
-            out.append({
+            # Adzuna fills salary_min/max with its own model's guess when the posting
+            # lists none, flagged salary_is_predicted="1" (RC1-649). A guess is not a
+            # posted range: keep it out of salaryMin/salaryMax so salary_ok never
+            # archives a real role on it and a later ATS sighting can fill the real one.
+            predicted = str(j.get("salary_is_predicted", "0")) == "1"
+            lo, hi = _to_int(j.get("salary_min")), _to_int(j.get("salary_max"))
+            item = {
                 "company": (j.get("company") or {}).get("display_name"),
                 "title": j.get("title"),
                 "location": (j.get("location") or {}).get("display_name") or "Remote",
                 "url": j.get("redirect_url"),
                 "description": _strip_tags(j.get("description")),
                 "postedDate": _agg_date(j.get("created")),
-                "salaryMin": _to_int(j.get("salary_min")),
-                "salaryMax": _to_int(j.get("salary_max")),
+                "salaryMin": None if predicted else lo,
+                "salaryMax": None if predicted else hi,
                 # Adzuna reports a geographic location even for remote roles; the
                 # what_and=remote scope means the posting mentions remote, so mark
                 # it remote rather than letting the city read as onsite.
                 "remoteStatus": "remote",
                 "descriptionTruncated": True,
-            })
+            }
+            if predicted and (hi or lo):
+                item["salaryEstimate"] = hi or lo
+            out.append(item)
         if not results:
             break
     return out
@@ -955,6 +964,22 @@ def title_decision(title, profile):
 def employer_ok(company, profile):
     skip = [e.lower() for e in profile.get("matching", {}).get("skipEmployers", [])]
     return (company or "").lower() not in skip
+
+
+def migrate_predicted_salary(role):
+    """Move a legacy Adzuna guess out of salaryMin/salaryMax (RC1-649).
+
+    Rows ingested before the fetcher read salary_is_predicted carry Adzuna's
+    single-figure guess as a posted range. The tell is a role seen ONLY on Adzuna
+    whose min equals its max. Returns True when the role was changed."""
+    lo, hi = role.get("salaryMin"), role.get("salaryMax")
+    if (role.get("source") == "adzuna"
+            and (role.get("appearedInSources") or ["adzuna"]) == ["adzuna"]
+            and lo is not None and lo == hi):
+        role["salaryEstimate"] = hi
+        role["salaryMin"] = role["salaryMax"] = None
+        return True
+    return False
 
 
 def salary_ok(role, profile):
@@ -1270,6 +1295,8 @@ def normalize(raw, source):
     }
     if raw.get("descriptionTruncated"):
         out["descriptionTruncated"] = True   # source serves partial JDs (e.g. Adzuna)
+    if raw.get("salaryEstimate"):
+        out["salaryEstimate"] = raw["salaryEstimate"]   # aggregator guess, never filtered on
     return out
 
 
@@ -2319,7 +2346,9 @@ def refilter(dry_run=False):
     started = datetime.datetime.now().isoformat(timespec="seconds")
     breakdown = {}
     protected = 0
+    estimates = 0
     for role in roles:
+        estimates += migrate_predicted_salary(role)   # RC1-649: legacy Adzuna guesses
         if role.get("id") in decided or role.get("userSaved"):
             kept.append(role)
             protected += 1
@@ -2345,6 +2374,8 @@ def refilter(dry_run=False):
 
     print(f"Refilter: {len(roles)} on board -> keep {len(kept)}, archive {len(archived)} "
           f"({protected} decided/saved roles protected).")
+    if estimates:
+        print(f"  moved {estimates} Adzuna predicted salaries to salaryEstimate (not filtered on).")
     for key, n in sorted(breakdown.items(), key=lambda kv: -kv[1]):
         print(f"  archive  {key:<18} {n}")
     if dry_run:

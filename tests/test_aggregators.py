@@ -179,6 +179,23 @@ class AggregatorFetcherTests(unittest.TestCase):
         finally:
             del os.environ["ADZUNA_APP_ID"], os.environ["ADZUNA_APP_KEY"]
 
+    def test_adzuna_predicted_salary_kept_out_of_range(self):
+        os.environ["ADZUNA_APP_ID"] = "id"
+        os.environ["ADZUNA_APP_KEY"] = "key"
+        predicted = {"results": [dict(ADZUNA["results"][0], salary_min=144856.0,
+                                      salary_max=144856.0, salary_is_predicted="1")]}
+        try:
+            pipeline.http_get_json = lambda url, timeout=20: predicted if "/1?" in url else {"results": []}
+            out = pipeline.fetch_agg_adzuna({})
+            self.assertIsNone(out[0]["salaryMin"])
+            self.assertIsNone(out[0]["salaryMax"])
+            self.assertEqual(out[0]["salaryEstimate"], 144856)
+            role = pipeline.normalize(out[0], "adzuna")
+            self.assertEqual(role["salaryEstimate"], 144856)
+            self.assertTrue(pipeline.salary_ok(role, {"preferences": {"salaryTarget": 150000}})[0])
+        finally:
+            del os.environ["ADZUNA_APP_ID"], os.environ["ADZUNA_APP_KEY"]
+
 
 class AggregatorPipelineTests(unittest.TestCase):
     """End-to-end: an enabled method:api search entry flows into run()."""

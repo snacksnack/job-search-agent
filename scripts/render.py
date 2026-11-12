@@ -39,6 +39,8 @@ def salary_str(r):
         return f"{sym}{lo // 1000}K\u2013{sym}{hi // 1000}K"
     if lo:
         return f"{sym}{lo // 1000}K+"
+    if r.get("salaryEstimate"):   # aggregator guess, not posted (RC1-649)
+        return f"~{sym}{r['salaryEstimate'] // 1000}K (Adzuna estimate)"
     return "Not specified"
 
 
