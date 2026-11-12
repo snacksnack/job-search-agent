@@ -113,6 +113,36 @@ class RefilterTests(unittest.TestCase):
         self.assertIn("ae", archived)
         self.assertEqual(archived["ae"].get("skillMatch"), sm)
 
+    # RC1-649: a legacy Adzuna guess (single figure, Adzuna-only) is moved to
+    # salaryEstimate and never archives the role; a posted low range still does.
+
+    def test_adzuna_single_figure_guess_is_kept_and_migrated(self):
+        self._setup([_role(id="guess", source="adzuna", appearedInSources=["adzuna"],
+                           salaryMin=120000, salaryMax=120000)])
+        self.assertEqual(_refilter(), 0)
+        kept = {r["id"]: r for r in self._jobs()}
+        self.assertIn("guess", kept)
+        self.assertIsNone(kept["guess"]["salaryMax"])
+        self.assertEqual(kept["guess"]["salaryEstimate"], 120000)
+
+    def test_posted_low_range_still_archived(self):
+        self._setup([_role(id="low", source="adzuna", appearedInSources=["adzuna"],
+                           salaryMin=110000, salaryMax=130000)])
+        self.assertEqual(_refilter(), 0)
+        self.assertIn("low", {r["id"] for r in self._archive()})
+
+    def test_single_figure_from_other_source_still_filtered(self):
+        self._setup([_role(id="ats", source="greenhouse", appearedInSources=["greenhouse"],
+                           salaryMin=120000, salaryMax=120000)])
+        self.assertEqual(_refilter(), 0)
+        self.assertIn("ats", {r["id"] for r in self._archive()})
+
+    def test_dry_run_does_not_write_migration(self):
+        self._setup([_role(id="guess", source="adzuna", appearedInSources=["adzuna"],
+                           salaryMin=120000, salaryMax=120000)])
+        self.assertEqual(_refilter(dry_run=True), 0)
+        self.assertEqual(self._jobs()[0]["salaryMax"], 120000)
+
 
 if __name__ == "__main__":
     unittest.main()
